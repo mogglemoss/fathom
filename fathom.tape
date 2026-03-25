@@ -13,8 +13,11 @@ Set TypingSpeed 80ms
 
 # Launch fathom with Boston station
 Hide
-Type "~/go/bin/fathom --station 8443970"
+Type "set -x PATH /Users/scott/go/bin $PATH"
+Enter
+Sleep 500ms
 Show
+Type "fathom --station 8443970"
 Enter
 Sleep 3s
 
