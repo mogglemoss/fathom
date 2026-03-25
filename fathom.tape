@@ -13,7 +13,7 @@ Set TypingSpeed 80ms
 
 # Launch fathom with Boston station
 Hide
-Type "fathom --station 8443970"
+Type "~/go/bin/fathom --station 8443970"
 Show
 Enter
 Sleep 3s
