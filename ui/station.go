@@ -78,17 +78,3 @@ func metaRow(label, value string) string {
 	)
 }
 
-// windDirName returns a compass direction name for the given degrees.
-func windDirName(deg float64) string {
-	dirs := []string{"N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"}
-	idx := int((deg+11.25)/22.5) % 16
-	return dirs[idx]
-}
-
-// WindDirName is exported for use from other ui files.
-func WindDirName(deg float64) string {
-	return windDirName(deg)
-}
-
-// Ensure unused import is used
-var _ = strings.Builder{}

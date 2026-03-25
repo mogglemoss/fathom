@@ -8,7 +8,7 @@ import (
 )
 
 // noaaTimeLayout is the timestamp format used in NOAA API responses.
-const noaaTimeLayout = "2006/01/02 15:04"
+const noaaTimeLayout = "2006-01-02 15:04"
 
 // ── Water level ───────────────────────────────────────────────────────────────
 
@@ -165,12 +165,13 @@ type rawStationResp struct {
 }
 
 type rawStation struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name"`
-	Lat      float64 `json:"lat"`
-	Lng      float64 `json:"lng"`
-	State    string  `json:"state"`
-	TimeZone string  `json:"timezone"`
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	Lat          float64 `json:"lat"`
+	Lng          float64 `json:"lng"`
+	State        string  `json:"state"`
+	TimeZone     string  `json:"timezone"`
+	TimeZoneCorr int     `json:"timezonecorr"`
 }
 
 // ParseStation parses a NOAA mdapi station JSON response.
@@ -183,14 +184,43 @@ func ParseStation(body []byte) (StationMeta, error) {
 		return StationMeta{}, fmt.Errorf("station: no station data returned")
 	}
 	s := raw.Stations[0]
+	// NOAA returns timezone abbreviations like "EST" which Go accepts as fixed
+	// offsets (no DST). Always run through the IANA mapping table first so we
+	// get proper daylight-saving handling.
+	tz := noaaTimezoneToIANA(s.TimeZone, s.TimeZoneCorr)
 	return StationMeta{
 		ID:       s.ID,
 		Name:     s.Name,
 		Lat:      s.Lat,
 		Lon:      s.Lng,
 		State:    s.State,
-		TimeZone: s.TimeZone,
+		TimeZone: tz,
 	}, nil
+}
+
+// noaaTimezoneToIANA maps NOAA timezone abbreviations to IANA names.
+// Falls back to a fixed-offset zone using timezonecorr if not recognised.
+func noaaTimezoneToIANA(abbr string, corrHours int) string {
+	switch abbr {
+	case "EST", "EDT":
+		return "America/New_York"
+	case "CST", "CDT":
+		return "America/Chicago"
+	case "MST", "MDT":
+		return "America/Denver"
+	case "PST", "PDT":
+		return "America/Los_Angeles"
+	case "AKST", "AKDT":
+		return "America/Anchorage"
+	case "HST":
+		return "Pacific/Honolulu"
+	case "AST", "ADT":
+		return "America/Halifax"
+	default:
+		// Unknown abbreviation — build a fixed zone from timezonecorr.
+		// This won't handle DST but beats falling back to UTC.
+		return fmt.Sprintf("Etc/GMT%+d", -corrHours)
+	}
 }
 
 // ── Datums ────────────────────────────────────────────────────────────────────
