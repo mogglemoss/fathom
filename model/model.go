@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -24,10 +25,11 @@ const (
 )
 
 const (
-	tidePollInterval = 60 * time.Second
-	predPollInterval = 6 * time.Hour
-	errClearDelay    = 4 * time.Second
-	predForecastDays = 14
+	tidePollInterval   = 60 * time.Second
+	predPollInterval   = 6 * time.Hour
+	errClearDelay      = 4 * time.Second
+	predForecastDays   = 14
+	nearbyStationCount = 8
 )
 
 // Model is the root BubbleTea model for fathom.
@@ -41,7 +43,7 @@ type Model struct {
 	predictions []noaa.Prediction
 	met         noaa.MetObs
 	station     noaa.StationMeta
-	loc         *time.Location // station local timezone
+	loc         *time.Location
 	dailyTides  []noaa.DailyTide
 
 	// UI state
@@ -54,6 +56,13 @@ type Model struct {
 	lastUpdated   time.Time
 	refreshFlash  bool
 	showHelp      bool
+
+	// Station picker state
+	showPicker     bool
+	pickerInput    string // typed station ID
+	pickerCursor   int    // selected row in nearby list
+	nearbyStations []noaa.NearbyStation
+	nearbyLoading  bool
 }
 
 // New creates the initial model from the given config.
@@ -109,7 +118,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case predictionsLoadedMsg:
 		if msg.err != nil {
-			// Don't overwrite a water-level error with a predictions error.
 			if m.errMsg == "" {
 				m.errMsg = "predictions: " + msg.err.Error()
 				cmds = append(cmds, errClearCmd())
@@ -127,10 +135,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stationLoadedMsg:
 		if msg.err == nil {
 			m.station = msg.meta
-			// Load the station's local timezone for timestamp parsing.
 			if loc, err := time.LoadLocation(msg.meta.TimeZone); err == nil {
 				m.loc = loc
 			}
+		}
+
+	case nearbyStationsLoadedMsg:
+		m.nearbyLoading = false
+		if msg.err == nil {
+			m.nearbyStations = msg.stations
 		}
 
 	case refreshFlashClearMsg:
@@ -140,12 +153,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errMsg = ""
 
 	case tea.KeyMsg:
+		// Station picker intercepts keys while open.
+		if m.showPicker {
+			cmds = append(cmds, m.updatePicker(msg)...)
+			return m, tea.Batch(cmds...)
+		}
+
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
 
 		case key.Matches(msg, m.keys.Help):
 			m.showHelp = !m.showHelp
+
+		case key.Matches(msg, m.keys.StationSearch):
+			m.showPicker = true
+			m.pickerInput = ""
+			m.pickerCursor = 0
+			if len(m.nearbyStations) == 0 {
+				m.nearbyLoading = true
+				cmds = append(cmds, m.fetchNearbyStationsCmd())
+			}
 
 		case key.Matches(msg, m.keys.NextView):
 			m.activeView = View((int(m.activeView) + 1) % 3)
@@ -161,17 +189,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.Up):
 			if m.activeView == ViewAlmanac {
-				m.almanacCursor--
-				if m.almanacCursor < 0 {
-					m.almanacCursor = 0
+				if m.almanacCursor > 0 {
+					m.almanacCursor--
 				}
 			}
 
 		case key.Matches(msg, m.keys.Down):
 			if m.activeView == ViewAlmanac {
-				m.almanacCursor++
-				if m.almanacCursor >= len(m.dailyTides) && len(m.dailyTides) > 0 {
-					m.almanacCursor = len(m.dailyTides) - 1
+				if m.almanacCursor < len(m.dailyTides)-1 {
+					m.almanacCursor++
 				}
 			}
 
@@ -181,6 +207,93 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+// updatePicker handles key events while the station picker is open.
+// Returns any commands to batch.
+func (m *Model) updatePicker(msg tea.KeyMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	switch {
+	case key.Matches(msg, m.keys.Cancel):
+		m.showPicker = false
+		m.pickerInput = ""
+
+	case key.Matches(msg, m.keys.Confirm):
+		cmds = append(cmds, m.applyPickerSelection()...)
+
+	case key.Matches(msg, m.keys.Up):
+		if m.pickerCursor > 0 {
+			m.pickerCursor--
+		}
+		m.pickerInput = "" // clear typed input when navigating list
+
+	case key.Matches(msg, m.keys.Down):
+		if m.pickerCursor < len(m.nearbyStations)-1 {
+			m.pickerCursor++
+		}
+		m.pickerInput = ""
+
+	default:
+		// Route printable characters to the text input.
+		switch msg.String() {
+		case "backspace", "ctrl+h":
+			if len(m.pickerInput) > 0 {
+				m.pickerInput = m.pickerInput[:len(m.pickerInput)-1]
+				m.pickerCursor = -1
+			}
+		default:
+			// Only accept printable ASCII (digits and letters for station IDs)
+			if len(msg.Runes) > 0 {
+				ch := string(msg.Runes)
+				if strings.TrimSpace(ch) != "" {
+					m.pickerInput += ch
+					m.pickerCursor = -1 // typing deselects list
+				}
+			}
+		}
+	}
+
+	return cmds
+}
+
+// applyPickerSelection switches to the selected or typed station and returns
+// fetch commands for the new station's data.
+func (m *Model) applyPickerSelection() []tea.Cmd {
+	var newID string
+	if m.pickerInput != "" {
+		newID = strings.TrimSpace(m.pickerInput)
+	} else if m.pickerCursor >= 0 && m.pickerCursor < len(m.nearbyStations) {
+		newID = m.nearbyStations[m.pickerCursor].ID
+	}
+
+	m.showPicker = false
+	m.pickerInput = ""
+
+	if newID == "" || newID == m.cfg.StationID {
+		return nil
+	}
+
+	m.cfg.StationID = newID
+	m.client = noaa.NewClient(m.cfg)
+	_ = config.Save(m.cfg)
+
+	// Reset data for new station
+	m.waterObs = nil
+	m.predictions = nil
+	m.met = noaa.MetObs{}
+	m.station = noaa.StationMeta{}
+	m.dailyTides = nil
+	m.loc = time.Local
+	m.lastUpdated = time.Time{}
+	m.errMsg = ""
+
+	return []tea.Cmd{
+		m.fetchWaterLevelCmd(),
+		m.fetchPredictionsCmd(),
+		m.fetchMetCmd(),
+		m.fetchStationCmd(),
+	}
 }
 
 // View renders the full TUI.
@@ -196,16 +309,19 @@ func (m Model) View() string {
 	bodyH := m.bodyHeight()
 
 	var body string
-	switch m.activeView {
-	case ViewTide:
-		body = ui.RenderTideView(m.waterObs, m.predictions, m.met, m.width, bodyH, !hasLevel)
-	case ViewAlmanac:
-		body = ui.RenderAlmanacView(m.dailyTides, m.almanacCursor, m.width, bodyH)
-	case ViewStation:
-		body = ui.RenderStationView(m.station, m.lastUpdated, m.cfg.Units, m.width)
+	if m.showPicker {
+		body = ui.RenderStationPicker(m.pickerInput, m.nearbyStations, m.pickerCursor, m.nearbyLoading, m.cfg.StationID, m.width, bodyH)
+	} else {
+		switch m.activeView {
+		case ViewTide:
+			body = ui.RenderTideView(m.waterObs, m.predictions, m.met, m.width, bodyH, !hasLevel)
+		case ViewAlmanac:
+			body = ui.RenderAlmanacView(m.dailyTides, m.almanacCursor, m.width, bodyH)
+		case ViewStation:
+			body = ui.RenderStationView(m.station, m.lastUpdated, m.cfg.Units, m.width)
+		}
 	}
 
-	// Pad body to fill available height so status+body+help fills the screen.
 	return statusBar + "\n" + body + helpBar
 }
 
@@ -226,7 +342,6 @@ func (m Model) currentLevel() (float64, bool) {
 
 // ── Data assembly ─────────────────────────────────────────────────────────────
 
-// assembleDailyTides groups predictions by calendar day and computes moon phases.
 func assembleDailyTides(preds []noaa.Prediction, loc *time.Location) []noaa.DailyTide {
 	if loc == nil {
 		loc = time.Local
@@ -310,6 +425,15 @@ func (m Model) fetchStationCmd() tea.Cmd {
 		defer cancel()
 		meta, err := m.client.FetchStation(ctx)
 		return stationLoadedMsg{meta: meta, err: err}
+	}
+}
+
+func (m Model) fetchNearbyStationsCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		stations, err := noaa.NearestStations(ctx, nearbyStationCount)
+		return nearbyStationsLoadedMsg{stations: stations, err: err}
 	}
 }
 

@@ -4,15 +4,18 @@ import "github.com/charmbracelet/bubbles/key"
 
 // KeyMap holds all key bindings for fathom.
 type KeyMap struct {
-	Up          key.Binding
-	Down        key.Binding
-	ViewTide    key.Binding
-	ViewAlmanac key.Binding
-	ViewStation key.Binding
-	NextView    key.Binding
-	Refresh     key.Binding
-	Help        key.Binding
-	Quit        key.Binding
+	Up            key.Binding
+	Down          key.Binding
+	ViewTide      key.Binding
+	ViewAlmanac   key.Binding
+	ViewStation   key.Binding
+	NextView      key.Binding
+	Refresh       key.Binding
+	Help          key.Binding
+	StationSearch key.Binding
+	Confirm       key.Binding
+	Cancel        key.Binding
+	Quit          key.Binding
 }
 
 // DefaultKeyMap returns the default key bindings.
@@ -49,6 +52,18 @@ func DefaultKeyMap() KeyMap {
 		Help: key.NewBinding(
 			key.WithKeys("?"),
 			key.WithHelp("?", "toggle help"),
+		),
+		StationSearch: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "station search"),
+		),
+		Confirm: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "select"),
+		),
+		Cancel: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
 		),
 		Quit: key.NewBinding(
 			key.WithKeys("q", "ctrl+c"),

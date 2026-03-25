@@ -36,6 +36,11 @@ type stationLoadedMsg struct {
 	err  error
 }
 
+type nearbyStationsLoadedMsg struct {
+	stations []noaa.NearbyStation
+	err      error
+}
+
 // ── UI flash / clear messages ─────────────────────────────────────────────────
 
 type refreshFlashClearMsg struct{}

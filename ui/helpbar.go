@@ -14,6 +14,7 @@ type helpItem struct {
 var shortHelp = []helpItem{
 	{"1/2/3", "tide · almanac · station"},
 	{"j/k", "scroll"},
+	{"s", "station search"},
 	{"r", "refresh"},
 	{"?", "more"},
 	{"q", "quit"},
@@ -26,6 +27,7 @@ var fullHelp = []helpItem{
 	{"tab", "next view"},
 	{"j/↓", "scroll down"},
 	{"k/↑", "scroll up"},
+	{"s", "station search"},
 	{"r", "refresh"},
 	{"?", "toggle help"},
 	{"q / ctrl+c", "quit"},
