@@ -6,6 +6,9 @@ import "github.com/charmbracelet/bubbles/key"
 type KeyMap struct {
 	Up            key.Binding
 	Down          key.Binding
+	PrevDay       key.Binding
+	NextDay       key.Binding
+	GoToday       key.Binding
 	ViewTide      key.Binding
 	ViewAlmanac   key.Binding
 	ViewStation   key.Binding
@@ -13,6 +16,7 @@ type KeyMap struct {
 	Refresh       key.Binding
 	Help          key.Binding
 	StationSearch key.Binding
+	DateInput     key.Binding
 	Confirm       key.Binding
 	Cancel        key.Binding
 	Quit          key.Binding
@@ -45,6 +49,18 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "next view"),
 		),
+		PrevDay: key.NewBinding(
+			key.WithKeys("left"),
+			key.WithHelp("←/→", "prev/next day"),
+		),
+		NextDay: key.NewBinding(
+			key.WithKeys("right"),
+			key.WithHelp("→", "next day"),
+		),
+		GoToday: key.NewBinding(
+			key.WithKeys("t"),
+			key.WithHelp("t", "jump to today"),
+		),
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),
 			key.WithHelp("r", "refresh"),
@@ -56,6 +72,10 @@ func DefaultKeyMap() KeyMap {
 		StationSearch: key.NewBinding(
 			key.WithKeys("s"),
 			key.WithHelp("s", "station search"),
+		),
+		DateInput: key.NewBinding(
+			key.WithKeys("d"),
+			key.WithHelp("d", "go to date"),
 		),
 		Confirm: key.NewBinding(
 			key.WithKeys("enter"),

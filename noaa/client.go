@@ -140,6 +140,34 @@ func (c *Client) FetchStation(ctx context.Context) (StationMeta, error) {
 	return meta, nil
 }
 
+// FetchDayCurve fetches 6-minute interval tide predictions for a single calendar
+// day, returning up to 241 data points (00:00–23:54) for a smooth
+// midnight-to-midnight chart. QC is set to "p" (predicted) on all returned obs.
+func (c *Client) FetchDayCurve(ctx context.Context, date time.Time, loc *time.Location) ([]WaterObs, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	d := date.In(loc)
+	dayStr := d.Format("20060102")
+	params := c.baseParams("predictions")
+	params.Set("interval", "6")
+	params.Set("begin_date", dayStr)
+	params.Set("end_date", dayStr)
+	body, err := c.get(ctx, dataBaseURL, params)
+	if err != nil {
+		return nil, err
+	}
+	preds, err := ParsePredictions(body, loc)
+	if err != nil {
+		return nil, err
+	}
+	obs := make([]WaterObs, len(preds))
+	for i, p := range preds {
+		obs[i] = WaterObs{Time: p.Time, Level: p.Level, QC: "p"}
+	}
+	return obs, nil
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 func (c *Client) baseParams(product string) url.Values {

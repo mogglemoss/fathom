@@ -29,7 +29,7 @@ func RenderStationView(
 	if meta.State != "" {
 		stationTitle += ", " + meta.State
 	}
-	titleStyle := lipgloss.NewStyle().Foreground(S.T.Accent).Bold(true).Underline(true)
+	titleStyle := lipgloss.NewStyle().Foreground(S.T.Accent).Bold(true)
 	b.WriteString("  " + titleStyle.Render(stationTitle))
 	b.WriteString("  " + S.StatusMeta.Render("Station "+meta.ID))
 	b.WriteString("\n\n")

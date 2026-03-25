@@ -2,12 +2,14 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/mogglemoss/fathom/config"
 	"github.com/mogglemoss/fathom/moon"
@@ -57,6 +59,17 @@ type Model struct {
 	refreshFlash  bool
 	showHelp      bool
 
+	// Tide view date navigation
+	viewDate        time.Time       // zero = today; explicit date = historical/future
+	dayCurve        []noaa.WaterObs // 6-min predictions for viewDate
+	dayCurveLoading bool
+	dayCurveStale   bool // true when dayCurve is from a previous date (new fetch in-flight)
+
+	// Date input overlay state (tide view only)
+	showDateInput bool
+	dateInput     string
+	dateInputErr  string
+
 	// Station picker state
 	showPicker     bool
 	pickerInput    string // typed station ID
@@ -82,6 +95,7 @@ func (m Model) Init() tea.Cmd {
 		m.fetchPredictionsCmd(),
 		m.fetchMetCmd(),
 		m.fetchStationCmd(),
+		m.fetchDayCurveCmd(),
 		m.tidePollTickCmd(),
 		m.predPollTickCmd(),
 	)
@@ -100,6 +114,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tidePollTickMsg:
 		cmds = append(cmds, m.tidePollTickCmd(), m.fetchWaterLevelCmd(), m.fetchMetCmd())
+		// Refresh today's curve on each poll tick so the "now" marker advances.
+		if m.viewDate.IsZero() {
+			cmds = append(cmds, m.fetchDayCurveCmd())
+		}
 
 	case predPollTickMsg:
 		cmds = append(cmds, m.predPollTickCmd(), m.fetchPredictionsCmd())
@@ -137,7 +155,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.station = msg.meta
 			if loc, err := time.LoadLocation(msg.meta.TimeZone); err == nil {
 				m.loc = loc
+				// Refetch the day curve with the correct station timezone now that
+				// we know it. The initial fetch used time.Local which may differ.
+				if m.viewDate.IsZero() {
+					// Timezone changed — old curve is for the wrong tz, clear entirely.
+					m.dayCurve = nil
+					m.dayCurveStale = false
+					m.dayCurveLoading = true
+					cmds = append(cmds, m.fetchDayCurveCmd())
+				}
 			}
+		}
+
+	case dayCurveLoadedMsg:
+		m.dayCurveLoading = false
+		m.dayCurveStale = false
+		if msg.err != nil {
+			if m.errMsg == "" {
+				m.errMsg = "tide curve: " + msg.err.Error()
+				cmds = append(cmds, errClearCmd())
+			}
+		} else if isSameCalendarDay(msg.date, m.currentViewDate(), m.loc) {
+			m.dayCurve = msg.obs
 		}
 
 	case nearbyStationsLoadedMsg:
@@ -158,6 +197,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		// Date input overlay intercepts keys while open.
+		if m.showDateInput {
+			cmds = append(cmds, m.updateDateInput(msg)...)
+			return m, tea.Batch(cmds...)
+		}
 		// Station picker intercepts keys while open.
 		if m.showPicker {
 			cmds = append(cmds, m.updatePicker(msg)...)
@@ -170,6 +214,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.Help):
 			m.showHelp = !m.showHelp
+
+		case key.Matches(msg, m.keys.DateInput):
+			// Works from any view — switches to tide and opens date entry.
+			m.activeView = ViewTide
+			m.showDateInput = true
+			m.dateInput = ""
+			m.dateInputErr = ""
 
 		case key.Matches(msg, m.keys.StationSearch):
 			m.showPicker = true
@@ -204,6 +255,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.almanacCursor < len(m.dailyTides)-1 {
 					m.almanacCursor++
 				}
+			}
+
+		case key.Matches(msg, m.keys.PrevDay):
+			if m.activeView == ViewTide {
+				m.viewDate = m.currentViewDate().AddDate(0, 0, -1)
+				m.dayCurveStale = true
+				m.dayCurveLoading = true
+				cmds = append(cmds, m.fetchDayCurveCmd())
+			}
+
+		case key.Matches(msg, m.keys.NextDay):
+			if m.activeView == ViewTide {
+				target := m.currentViewDate().AddDate(0, 0, 1)
+				// Cap at one year ahead.
+				limit := time.Now().AddDate(1, 0, 0)
+				if target.Before(limit) {
+					if isSameCalendarDay(target, time.Now(), m.loc) {
+						m.viewDate = time.Time{} // back to "today" mode
+					} else {
+						m.viewDate = target
+					}
+					m.dayCurveStale = true
+					m.dayCurveLoading = true
+					cmds = append(cmds, m.fetchDayCurveCmd())
+				}
+			}
+
+		case key.Matches(msg, m.keys.GoToday):
+			if m.activeView == ViewTide && !m.viewDate.IsZero() {
+				m.viewDate = time.Time{}
+				m.dayCurveStale = true
+				m.dayCurveLoading = true
+				cmds = append(cmds, m.fetchDayCurveCmd())
+			}
+
+		case key.Matches(msg, m.keys.Confirm):
+			// Almanac Enter → drill into that day's tide chart.
+			if m.activeView == ViewAlmanac && len(m.dailyTides) > 0 {
+				day := m.dailyTides[m.almanacCursor]
+				m.activeView = ViewTide
+				if isSameCalendarDay(day.Date, time.Now(), m.loc) {
+					m.viewDate = time.Time{}
+				} else {
+					m.viewDate = day.Date
+				}
+				m.dayCurveStale = true
+				m.dayCurveLoading = true
+				cmds = append(cmds, m.fetchDayCurveCmd())
 			}
 
 		case key.Matches(msg, m.keys.Refresh):
@@ -262,6 +361,97 @@ func (m *Model) updatePicker(msg tea.KeyMsg) []tea.Cmd {
 	return cmds
 }
 
+// updateDateInput handles key events while the date input overlay is open.
+func (m *Model) updateDateInput(msg tea.KeyMsg) []tea.Cmd {
+	switch {
+	case key.Matches(msg, m.keys.Cancel):
+		m.showDateInput = false
+		m.dateInput = ""
+		m.dateInputErr = ""
+
+	case key.Matches(msg, m.keys.Confirm):
+		t, err := parseFuzzyDate(m.dateInput, m.loc)
+		if err != nil {
+			m.dateInputErr = err.Error()
+			return nil
+		}
+		m.showDateInput = false
+		m.dateInputErr = ""
+		if isSameCalendarDay(t, time.Now(), m.loc) {
+			m.viewDate = time.Time{}
+		} else {
+			m.viewDate = t
+		}
+		m.dayCurveStale = true
+		m.dayCurveLoading = true
+		return []tea.Cmd{m.fetchDayCurveCmd()}
+
+	default:
+		switch msg.String() {
+		case "backspace", "ctrl+h":
+			if len(m.dateInput) > 0 {
+				m.dateInput = m.dateInput[:len(m.dateInput)-1]
+				m.dateInputErr = ""
+			}
+		default:
+			// Use msg.String() so space (KeySpace, Runes==nil) and all
+			// printable ASCII including '-', '/' are accepted.
+			s := msg.String()
+			if len(s) == 1 && s[0] >= 32 && s[0] < 127 {
+				m.dateInput += s
+				m.dateInputErr = ""
+			}
+		}
+	}
+	return nil
+}
+
+// parseFuzzyDate tries several common date formats and returns midnight of that
+// day in loc. Formats without a year assume the current year.
+func parseFuzzyDate(input string, loc *time.Location) (time.Time, error) {
+	if loc == nil {
+		loc = time.Local
+	}
+	// Normalize
+	s := strings.TrimSpace(input)
+	s = strings.ReplaceAll(s, ",", " ")
+	for strings.Contains(s, "  ") {
+		s = strings.ReplaceAll(s, "  ", " ")
+	}
+	// Title-case so month names parse: "oct" → "Oct", "october" → "October"
+	words := strings.Fields(s)
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + strings.ToLower(w[1:])
+		}
+	}
+	s = strings.Join(words, " ")
+
+	now := time.Now().In(loc)
+
+	// Formats with explicit year
+	for _, layout := range []string{
+		"Jan 2 2006", "January 2 2006",
+		"1/2/2006", "01/02/2006",
+		"2006-01-02",
+	} {
+		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
+			return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc), nil
+		}
+	}
+
+	// Formats without year — assume current year
+	for _, layout := range []string{
+		"Jan 2", "January 2", "1/2", "01/02",
+	} {
+		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
+			return time.Date(now.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc), nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("try \"Oct 11\", \"Oct 11 2025\", or \"2025-10-11\"")
+}
+
 // applyPickerSelection switches to the selected or typed station and returns
 // fetch commands for the new station's data.
 func (m *Model) applyPickerSelection() []tea.Cmd {
@@ -293,11 +483,18 @@ func (m *Model) applyPickerSelection() []tea.Cmd {
 	m.lastUpdated = time.Time{}
 	m.errMsg = ""
 
+	// Reset date navigation to today for the new station (no stale data to show).
+	m.viewDate = time.Time{}
+	m.dayCurve = nil
+	m.dayCurveStale = false
+	m.dayCurveLoading = true
+
 	return []tea.Cmd{
 		m.fetchWaterLevelCmd(),
 		m.fetchPredictionsCmd(),
 		m.fetchMetCmd(),
 		m.fetchStationCmd(),
+		m.fetchDayCurveCmd(),
 	}
 }
 
@@ -310,16 +507,38 @@ func (m Model) View() string {
 	currentLevel, hasLevel := m.currentLevel()
 	direction := ui.TideDirection(m.waterObs)
 	statusBar := ui.RenderStatusBar(m.station, currentLevel, hasLevel, direction, m.errMsg, m.lastUpdated, m.width, m.refreshFlash, int(m.activeView))
-	helpBar := ui.RenderHelpBar(m.width, m.showHelp)
+	overlay := ""
+	if m.showPicker {
+		overlay = "picker"
+	} else if m.showDateInput {
+		overlay = "dateinput"
+	}
+	helpBar := ui.RenderHelpBar(m.width, m.showHelp, int(m.activeView), overlay)
 	bodyH := m.bodyHeight()
 
 	var body string
-	if m.showPicker {
+	if m.showDateInput {
+		body = ui.RenderDateInput(m.dateInput, m.dateInputErr, m.width, bodyH)
+	} else if m.showPicker {
 		body = ui.RenderStationPicker(m.pickerInput, m.nearbyStations, m.pickerCursor, m.nearbyLoading, m.cfg.StationID, m.width, bodyH)
 	} else {
 		switch m.activeView {
 		case ViewTide:
-			body = ui.RenderTideView(m.waterObs, m.predictions, m.met, m.width, bodyH, !hasLevel)
+			isToday := m.viewDate.IsZero()
+			nowFrac := 0.0
+			if isToday {
+				loc := m.loc
+				if loc == nil {
+					loc = time.Local
+				}
+				now := time.Now().In(loc)
+				nowFrac = float64(now.Hour()*60+now.Minute()) / (24 * 60)
+			}
+			body = ui.RenderTideView(
+				m.waterObs, m.predictions, m.met,
+				m.dayCurve, m.dayCurveStale, m.currentViewDate(), isToday, nowFrac,
+				m.width, bodyH,
+			)
 		case ViewAlmanac:
 			body = ui.RenderAlmanacView(m.dailyTides, m.almanacCursor, m.width, bodyH)
 		case ViewStation:
@@ -327,7 +546,10 @@ func (m Model) View() string {
 		}
 	}
 
-	return statusBar + "\n" + body + helpBar
+	// Pad body to exactly bodyH lines so the help bar is always pinned to the
+	// bottom of the terminal regardless of which view or overlay is active.
+	pinnedBody := lipgloss.NewStyle().Height(bodyH).Render(body)
+	return statusBar + "\n" + pinnedBody + "\n" + helpBar
 }
 
 func (m Model) bodyHeight() int {
@@ -343,6 +565,30 @@ func (m Model) currentLevel() (float64, bool) {
 		return 0, false
 	}
 	return m.waterObs[len(m.waterObs)-1].Level, true
+}
+
+// currentViewDate returns the date being displayed in the tide view.
+// When viewDate is zero (today mode), it returns today's midnight in m.loc.
+func (m Model) currentViewDate() time.Time {
+	if m.viewDate.IsZero() {
+		loc := m.loc
+		if loc == nil {
+			loc = time.Local
+		}
+		now := time.Now().In(loc)
+		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	}
+	return m.viewDate
+}
+
+// isSameCalendarDay returns true if a and b fall on the same calendar day in loc.
+func isSameCalendarDay(a, b time.Time, loc *time.Location) bool {
+	if loc == nil {
+		loc = time.Local
+	}
+	ai := a.In(loc)
+	bi := b.In(loc)
+	return ai.Year() == bi.Year() && ai.Month() == bi.Month() && ai.Day() == bi.Day()
 }
 
 // ── Data assembly ─────────────────────────────────────────────────────────────
@@ -433,6 +679,17 @@ func (m Model) fetchStationCmd() tea.Cmd {
 	}
 }
 
+func (m Model) fetchDayCurveCmd() tea.Cmd {
+	date := m.currentViewDate()
+	loc := m.loc
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		obs, err := m.client.FetchDayCurve(ctx, date, loc)
+		return dayCurveLoadedMsg{date: date, obs: obs, err: err}
+	}
+}
+
 func (m Model) fetchNearbyStationsCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -466,6 +723,43 @@ func (m *Model) handleClick(x, y int) []tea.Cmd {
 	body := y - 1 // body coordinate (0 = first line of body area)
 	if body < 0 {
 		return cmds
+	}
+
+	// ── Tide view: click the ← / → date navigation arrows ────────────────
+	// For today:     nav row is body row 3 → y=4
+	// For non-today: nav row is body row 1 → y=2
+	// Left third of row = prev day, right third = next day.
+	if m.activeView == ViewTide && !m.showPicker && !m.showDateInput {
+		isToday := m.viewDate.IsZero()
+		navY := 4
+		if !isToday {
+			navY = 2
+		}
+		if y == navY {
+			third := m.width / 3
+			if x < third {
+				// ← prev day
+				m.viewDate = m.currentViewDate().AddDate(0, 0, -1)
+				m.dayCurveStale = true
+				m.dayCurveLoading = true
+				cmds = append(cmds, m.fetchDayCurveCmd())
+			} else if x > 2*third {
+				// → next day
+				target := m.currentViewDate().AddDate(0, 0, 1)
+				limit := time.Now().AddDate(1, 0, 0)
+				if target.Before(limit) {
+					if isSameCalendarDay(target, time.Now(), m.loc) {
+						m.viewDate = time.Time{}
+					} else {
+						m.viewDate = target
+					}
+					m.dayCurveStale = true
+					m.dayCurveLoading = true
+					cmds = append(cmds, m.fetchDayCurveCmd())
+				}
+			}
+			return cmds
+		}
 	}
 
 	// ── Station picker: click on a nearby station row ──────────────────────

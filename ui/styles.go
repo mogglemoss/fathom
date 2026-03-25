@@ -21,23 +21,32 @@ type Theme struct {
 	Bad  lipgloss.Color // errors, stale data
 }
 
-// Default is the built-in coastal theme.
+// Default is the built-in subaquatic retrofuture theme.
+// Every color choice is intentional:
+//   - Accent (#00E0C8): bioluminescent teal — the primary phosphor glow
+//   - Rising (#00C985): deep-water green — incoming tide, life, motion
+//   - Falling (#3A7FAA): ocean steel blue — outgoing tide, depth, stillness
+//   - HighTide (#00DFFF): phosphor cyan — crisp technical readout color
+//   - LowTide (#5B9EC9): muted steel — secondary tide reference
+//   - Warn (#FFAA00): amber — instrument warning lamp, intentionally warm
+//   - TextPrimary dark (#C4E8F0): pale aquamarine — easy on eyes, subaquatic
+//   - Selected dark (#0D2535): deep ocean — where the cursor rests
 var Default = Theme{
-	Rising:   lipgloss.Color("#04B575"), // green — incoming tide
-	Falling:  lipgloss.Color("#4682B4"), // steel blue — outgoing tide
-	HighTide: lipgloss.Color("#00BFFF"), // deep sky blue
-	LowTide:  lipgloss.Color("#6495ED"), // cornflower blue
+	Rising:   lipgloss.Color("#00C985"), // bioluminescent green
+	Falling:  lipgloss.Color("#3A7FAA"), // ocean steel blue
+	HighTide: lipgloss.Color("#00DFFF"), // phosphor cyan
+	LowTide:  lipgloss.Color("#5B9EC9"), // muted steel blue
 
-	Accent:        lipgloss.Color("#00CED1"), // dark turquoise
-	AccentSubtle:  lipgloss.AdaptiveColor{Light: "#0087AF", Dark: "#7B61FF"},
-	Selected:      lipgloss.AdaptiveColor{Light: "#D6F4F8", Dark: "#1E2D40"},
-	Border:        lipgloss.AdaptiveColor{Light: "#CCCCCC", Dark: "#3D4F5C"},
-	TextPrimary:   lipgloss.AdaptiveColor{Light: "#1A1A1A", Dark: "#E8F4F8"},
-	TextSecondary: lipgloss.AdaptiveColor{Light: "#6C6A62", Dark: "#7A9BAD"},
+	Accent:        lipgloss.Color("#00E0C8"), // bioluminescent teal
+	AccentSubtle:  lipgloss.AdaptiveColor{Light: "#007A8A", Dark: "#00A89A"},
+	Selected:      lipgloss.AdaptiveColor{Light: "#D0F0F4", Dark: "#0D2535"},
+	Border:        lipgloss.AdaptiveColor{Light: "#B0C8D0", Dark: "#1C3D50"},
+	TextPrimary:   lipgloss.AdaptiveColor{Light: "#1A2830", Dark: "#C4E8F0"},
+	TextSecondary: lipgloss.AdaptiveColor{Light: "#5A7480", Dark: "#4D7888"},
 
-	Good: lipgloss.Color("#04B575"),
-	Warn: lipgloss.Color("#FFBF00"),
-	Bad:  lipgloss.Color("#FF5F87"),
+	Good: lipgloss.Color("#00C985"),
+	Warn: lipgloss.Color("#FFAA00"), // amber warning lamp
+	Bad:  lipgloss.Color("#FF4060"),
 }
 
 // Styles holds all pre-built lipgloss styles derived from the active theme.
@@ -62,9 +71,10 @@ type Styles struct {
 	TideFalling lipgloss.Style // ▼ falling indicator
 	TideHigh    lipgloss.Style // next HIGH label and value
 	TideLow     lipgloss.Style // next LOW label and value
-	SparkHigh   lipgloss.Style // sparkline bars above mean
-	SparkLow    lipgloss.Style // sparkline bars below mean
-	SparkCursor lipgloss.Style // current position in sparkline
+	SparkHigh   lipgloss.Style // chart bars — past, above mean
+	SparkLow    lipgloss.Style // chart bars — past, below mean
+	SparkFuture lipgloss.Style // chart bars — future prediction (dim)
+	SparkCursor lipgloss.Style // current time position (bright glow)
 
 	// Almanac
 	AlmanacDate   lipgloss.Style
@@ -102,8 +112,8 @@ func New(t Theme) Styles {
 	s.StatusGood = lipgloss.NewStyle().Foreground(t.Good)
 	s.StatusBad = lipgloss.NewStyle().Foreground(t.Bad)
 
-	// Shared
-	s.SectionHeader = lipgloss.NewStyle().Foreground(t.Accent).Bold(true).Underline(true)
+	// Shared — instrument panel style: bold, no underline (underline = generic web)
+	s.SectionHeader = lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
 	s.Label = lipgloss.NewStyle().Foreground(t.TextSecondary)
 	s.Value = lipgloss.NewStyle().Foreground(t.TextPrimary)
 
@@ -115,6 +125,8 @@ func New(t Theme) Styles {
 	s.TideLow = lipgloss.NewStyle().Foreground(t.LowTide)
 	s.SparkHigh = lipgloss.NewStyle().Foreground(t.Rising)
 	s.SparkLow = lipgloss.NewStyle().Foreground(t.Falling)
+	// Future: dim secondary color — clearly muted vs vivid past, uncertain depth
+	s.SparkFuture = lipgloss.NewStyle().Foreground(t.TextSecondary)
 	s.SparkCursor = lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
 
 	// Almanac

@@ -28,10 +28,7 @@ func RenderStationPicker(
 	var b strings.Builder
 	b.WriteString("\n")
 
-	// ── Title ─────────────────────────────────────────────────────────────
-	b.WriteString("  " + S.SectionHeader.Render("STATION SEARCH") + "\n\n")
-
-	// ── Text input ────────────────────────────────────────────────────────
+	// ── Title + input in a framed box ──────────────────────────────────────
 	prompt := S.Label.Render("station ID  ") + S.AccentStyle().Render("> ")
 	var inputDisplay string
 	if input == "" {
@@ -39,7 +36,19 @@ func RenderStationPicker(
 	} else {
 		inputDisplay = S.TideLevel.Render(input) + S.SparkCursor.Render("█")
 	}
-	b.WriteString("  " + prompt + inputDisplay + "\n\n")
+
+	frameW := width - 4
+	if frameW < 40 {
+		frameW = 40
+	}
+	inputFrame := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(string(S.T.Accent))).
+		Padding(0, 2).
+		Width(frameW).
+		Render(S.SectionHeader.Render("▸ STATION SEARCH") + "\n\n" + prompt + inputDisplay)
+
+	b.WriteString("  " + inputFrame + "\n\n")
 
 	// ── Nearby stations ───────────────────────────────────────────────────
 	if loading {
@@ -105,14 +114,6 @@ func RenderStationPicker(
 	}
 
 	b.WriteString("\n")
-
-	// ── Key hints ─────────────────────────────────────────────────────────
-	sep := S.HelpSep.Render("  ·  ")
-	hints := S.HelpKey.Render("j/k") + S.HelpDesc.Render(" navigate") +
-		sep + S.HelpKey.Render("enter") + S.HelpDesc.Render(" select") +
-		sep + S.HelpKey.Render("esc") + S.HelpDesc.Render(" cancel")
-	b.WriteString("  " + hints + "\n")
-
 	return b.String()
 }
 

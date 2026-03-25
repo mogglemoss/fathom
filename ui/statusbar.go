@@ -27,19 +27,21 @@ func RenderStatusBar(
 	logo := S.StatusLogo.Render("◈") + S.StatusLogo.Render(" fathom")
 
 	viewLabels := []string{"TIDE", "ALMANAC", "STATION"}
-	var viewDots string
+	var viewTabs string
 	for i, label := range viewLabels {
 		if i > 0 {
-			viewDots += S.HelpSep.Render("  ")
+			viewTabs += "  "
 		}
 		if i == activeView {
-			viewDots += lipgloss.NewStyle().Foreground(S.T.Accent).Bold(true).Render("● " + label)
+			// Active tab: reverse video is terminal-native and works inside any
+			// lipgloss container (nested Background styles get stripped).
+			viewTabs += lipgloss.NewStyle().Reverse(true).Bold(true).Render(" " + label + " ")
 		} else {
-			viewDots += S.StatusMeta.Render("○ " + label)
+			viewTabs += S.StatusMeta.Render("  " + label)
 		}
 	}
 
-	left := logo + S.HelpSep.Render("   ") + viewDots
+	left := logo + S.HelpSep.Render("   ") + viewTabs
 
 	// ── Right: station + level + time ─────────────────────────────────────
 	var right string

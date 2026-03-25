@@ -41,6 +41,13 @@ type nearbyStationsLoadedMsg struct {
 	err      error
 }
 
+// dayCurveLoadedMsg carries 6-minute interval predictions for a single day.
+type dayCurveLoadedMsg struct {
+	date time.Time
+	obs  []noaa.WaterObs
+	err  error
+}
+
 // ── UI flash / clear messages ─────────────────────────────────────────────────
 
 type refreshFlashClearMsg struct{}
