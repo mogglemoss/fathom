@@ -103,7 +103,7 @@ func New(t Theme) Styles {
 	s.StatusBad = lipgloss.NewStyle().Foreground(t.Bad)
 
 	// Shared
-	s.SectionHeader = lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
+	s.SectionHeader = lipgloss.NewStyle().Foreground(t.Accent).Bold(true).Underline(true)
 	s.Label = lipgloss.NewStyle().Foreground(t.TextSecondary)
 	s.Value = lipgloss.NewStyle().Foreground(t.TextPrimary)
 

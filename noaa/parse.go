@@ -230,8 +230,8 @@ type rawDatumsResp struct {
 }
 
 type rawDatum struct {
-	Name  string  `json:"n"`
-	Value float64 `json:"v"`
+	Name  string  `json:"name"`
+	Value float64 `json:"value"`
 }
 
 // ParseDatums parses a NOAA datums JSON response.

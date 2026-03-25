@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fathom TUI",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "."],
+      "port": null
+    },
+    {
+      "name": "fathom SSH server",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", ".", "--serve", "--port", "23234"],
+      "port": 23234
+    }
+  ]
+}

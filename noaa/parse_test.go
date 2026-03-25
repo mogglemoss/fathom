@@ -179,11 +179,12 @@ func TestNoaaTimezoneToIANA(t *testing.T) {
 }
 
 func TestParseDatums(t *testing.T) {
+	// Real NOAA datums API uses "name" and "value" fields (not "n"/"v")
 	body := []byte(`{
 		"datums": [
-			{"n":"MLLW","v":0.0},
-			{"n":"MHW","v":9.532},
-			{"n":"MHHW","v":9.861}
+			{"name":"MLLW","description":"Mean Lower-Low Water","value":0.0},
+			{"name":"MHW","description":"Mean High Water","value":9.532},
+			{"name":"MHHW","description":"Mean Higher-High Water","value":9.861}
 		]
 	}`)
 	datums, err := ParseDatums(body)
