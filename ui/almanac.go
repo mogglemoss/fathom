@@ -19,15 +19,35 @@ var significantPhaseNames = map[string]bool{
 	"Last Quarter":  true,
 }
 
-// Column widths (visual characters, excluding ANSI codes).
+// Fixed visual widths for the almanac grid columns.
+// Every row must produce exactly these widths so columns stay aligned.
+//
+//	date:  "Mon Jan _2"     → always 10 chars  (Go _2 = space-padded day)
+//	event: "  ▲  4:32p  5.8" → 16 chars each
+//	       2(sep) + 1(▲) + 1(sp) + 6(time) + 1(sp) + 5(level) = 16
+//	range: "   5.8ft"        → 8 chars
 const (
-	colDate  = 10 // "Mon Jan  2"
-	colEvent = 14 // "▲ 07:14  10.4"  (arrow sp time 2sp level)
-	colRange = 8  // "  10.1ft"
-	colMoon  = 4  // "  🌕" (glyph always)
+	almDateW  = 10
+	almEvtW   = 16 // includes 2-char leading separator
+	almRangeW = 8
 )
 
-// RenderAlmanacView renders the 7–14 day tide forecast in a grid layout.
+// almEvtHdr is the column header string for each event slot (16 chars).
+// It aligns TIME over the time field and FT over the level field.
+const almEvtHdr = "    TIME    FT  "
+
+// fmtTideTime formats a time.Time as " 4:32p" or "11:58a" — always 6 chars.
+// The a/p suffix makes AM vs PM unambiguous at a glance.
+func fmtTideTime(t time.Time) string {
+	sfx := "a"
+	if t.Hour() >= 12 {
+		sfx = "p"
+	}
+	// "3:04" gives 12h without leading zero (4–5 chars); pad to 5 with space.
+	return fmt.Sprintf("%5s%s", t.Format("3:04"), sfx)
+}
+
+// RenderAlmanacView renders the 7–14 day tide forecast in a fixed-width grid.
 func RenderAlmanacView(
 	days []noaa.DailyTide,
 	cursor int,
@@ -53,22 +73,14 @@ func RenderAlmanacView(
 		visibleRows = 1
 	}
 
-	offset := cursor - visibleRows + 3
-	if offset < 0 {
-		offset = 0
-	}
-	if offset > len(days)-visibleRows {
-		offset = len(days) - visibleRows
-		if offset < 0 {
-			offset = 0
-		}
-	}
+	offset := AlmanacScrollOffset(cursor, visibleRows, len(days))
 
-	// Determine how many event columns we need (max tides in any visible day)
 	end := offset + visibleRows
 	if end > len(days) {
 		end = len(days)
 	}
+
+	// Determine the maximum number of event columns needed in the visible window.
 	maxEvents := 2
 	for i := offset; i < end; i++ {
 		if n := len(days[i].Predictions); n > maxEvents {
@@ -78,30 +90,35 @@ func RenderAlmanacView(
 	if maxEvents > 4 {
 		maxEvents = 4
 	}
-
-	// Narrow terminals: fewer columns
-	rowWidth := 2 + colDate + maxEvents*colEvent + colRange + colMoon + 20
-	if rowWidth > width {
+	// Narrow-terminal fallback: drop to 2 events.
+	minRowW := 2 + almDateW + 2*almEvtW + almRangeW + 6
+	if width < minRowW {
 		maxEvents = 2
 	}
 
-	// Header row
-	header := renderAlmanacHeader(maxEvents)
-	b.WriteString(header + "\n")
+	// ── Section header (own line) ─────────────────────────────────────────
+	b.WriteString(S.SectionHeader.Render("  TIDE FORECAST") + "\n")
 
-	// Top scroll indicator
+	// ── Column headers (aligned with data) ───────────────────────────────
+	b.WriteString("  " + strings.Repeat(" ", almDateW))
+	for range make([]struct{}, maxEvents) {
+		b.WriteString(S.Label.Render(almEvtHdr))
+	}
+	b.WriteString(S.Label.Render("  RANGE") + "\n")
+
+	// ── Top scroll indicator ──────────────────────────────────────────────
 	if offset > 0 {
 		b.WriteString(S.HelpDesc.Render(fmt.Sprintf("  ▲ %d days above", offset)) + "\n")
 	}
 
+	// ── Data rows ─────────────────────────────────────────────────────────
 	todayStr := time.Now().Format("2006-01-02")
-
 	for i := offset; i < end; i++ {
 		isToday := days[i].Date.Format("2006-01-02") == todayStr
-		row := renderAlmanacRow(days[i], width, i == cursor, isToday, maxEvents)
-		b.WriteString(row + "\n")
+		b.WriteString(renderAlmanacRow(days[i], width, i == cursor, isToday, maxEvents) + "\n")
 	}
 
+	// ── Bottom scroll indicator ───────────────────────────────────────────
 	if end < len(days) {
 		b.WriteString(S.HelpDesc.Render(fmt.Sprintf("  ▼ %d more days", len(days)-end)))
 	}
@@ -109,24 +126,31 @@ func RenderAlmanacView(
 	return b.String()
 }
 
-func renderAlmanacHeader(numEvents int) string {
-	var b strings.Builder
-	b.WriteString(S.SectionHeader.Render("  TIDE FORECAST") + "  ")
-	b.WriteString(S.Label.Render(strings.Repeat(" ", colDate)))
-	for i := 0; i < numEvents; i++ {
-		b.WriteString(S.Label.Render(fmt.Sprintf("  %-12s", "TIME   FT")))
+// AlmanacScrollOffset computes the scroll offset from cursor position.
+// Exported so the model can reuse it for mouse-click row mapping.
+func AlmanacScrollOffset(cursor, visibleRows, totalDays int) int {
+	offset := cursor - visibleRows + 3
+	if offset < 0 {
+		offset = 0
 	}
-	return b.String()
+	if offset > totalDays-visibleRows {
+		offset = totalDays - visibleRows
+		if offset < 0 {
+			offset = 0
+		}
+	}
+	return offset
 }
 
 func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool, numEvents int) string {
-	// Sort predictions by time.
+	// Sort predictions by time so columns are always in chronological order.
 	preds := make([]noaa.Prediction, len(day.Predictions))
 	copy(preds, day.Predictions)
 	sort.Slice(preds, func(i, j int) bool { return preds[i].Time.Before(preds[j].Time) })
 
-	// Date column
-	dateStr := day.Date.Format("Mon Jan  2")
+	// ── Date column (always almDateW = 10 chars) ──────────────────────────
+	// "Mon Jan _2" uses _2 (space-padded day) → consistent 10 chars.
+	dateStr := day.Date.Format("Mon Jan _2")
 	var dateCol string
 	if isToday {
 		dateCol = lipgloss.NewStyle().Foreground(S.T.Accent).Bold(true).Render(dateStr)
@@ -134,12 +158,13 @@ func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool, num
 		dateCol = S.AlmanacDate.Render(dateStr)
 	}
 
-	// Tide event columns
+	// ── Event columns (each exactly almEvtW = 16 visual chars) ───────────
 	var tideStr strings.Builder
 	var maxHigh, minLow float64
 	hasHigh, hasLow := false, false
 
 	for i := 0; i < numEvents; i++ {
+		// 2-char leading separator
 		tideStr.WriteString("  ")
 		if i < len(preds) {
 			p := preds[i]
@@ -148,35 +173,40 @@ func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool, num
 					maxHigh = p.Level
 					hasHigh = true
 				}
-				arrow := S.AlmanacHigh.Render("▲")
-				t := S.Value.Render(p.Time.Format("15:04"))
-				v := S.AlmanacHigh.Render(fmt.Sprintf("%5.1f", p.Level))
-				tideStr.WriteString(arrow + " " + t + " " + v)
+				tideStr.WriteString(
+					S.AlmanacHigh.Render("▲") + " " +
+						S.Value.Render(fmtTideTime(p.Time)) + " " +
+						S.AlmanacHigh.Render(fmt.Sprintf("%5.1f", p.Level)),
+				)
 			} else {
 				if !hasLow || p.Level < minLow {
 					minLow = p.Level
 					hasLow = true
 				}
-				arrow := S.AlmanacLow.Render("▼")
-				t := S.Value.Render(p.Time.Format("15:04"))
-				v := S.AlmanacLow.Render(fmt.Sprintf("%5.1f", p.Level))
-				tideStr.WriteString(arrow + " " + t + " " + v)
+				tideStr.WriteString(
+					S.AlmanacLow.Render("▼") + " " +
+						S.Value.Render(fmtTideTime(p.Time)) + " " +
+						S.AlmanacLow.Render(fmt.Sprintf("%5.1f", p.Level)),
+				)
 			}
 		} else {
-			// Empty slot — preserve alignment
-			tideStr.WriteString(strings.Repeat(" ", colEvent-2))
+			// Empty slot — fill with spaces to preserve alignment.
+			// almEvtW - 2 (already wrote sep) = 14 chars of content.
+			tideStr.WriteString(strings.Repeat(" ", almEvtW-2))
 		}
 	}
 
-	// Tidal range column
+	// ── Range column ──────────────────────────────────────────────────────
 	var rangeStr string
 	if hasHigh && hasLow {
-		rangeStr = "  " + S.Label.Render(fmt.Sprintf("%4.1fft", maxHigh-minLow))
+		// "  X.Xft" or " XX.Xft" — use %5.1f for the number (5 chars) + "ft" = 7,
+		// but we add a 1-char space prefix → 8 chars total = almRangeW.
+		rangeStr = " " + S.Label.Render(fmt.Sprintf("%5.1fft", maxHigh-minLow))
 	} else {
-		rangeStr = strings.Repeat(" ", colRange)
+		rangeStr = strings.Repeat(" ", almRangeW)
 	}
 
-	// Moon column — glyph always; name only for significant phases
+	// ── Moon column ───────────────────────────────────────────────────────
 	var moonStr string
 	if day.MoonName != "" {
 		glyph := moonPhaseGlyph(day.MoonPhase)

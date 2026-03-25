@@ -152,6 +152,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errClearMsg:
 		m.errMsg = ""
 
+	case tea.MouseMsg:
+		if msg.Type == tea.MouseLeft {
+			cmds = append(cmds, m.handleClick(msg.X, msg.Y)...)
+		}
+
 	case tea.KeyMsg:
 		// Station picker intercepts keys while open.
 		if m.showPicker {
@@ -435,6 +440,73 @@ func (m Model) fetchNearbyStationsCmd() tea.Cmd {
 		stations, err := noaa.NearestStations(ctx, nearbyStationCount)
 		return nearbyStationsLoadedMsg{stations: stations, err: err}
 	}
+}
+
+// handleClick processes a left-button mouse click at terminal position (x, y).
+func (m *Model) handleClick(x, y int) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	// ── Status bar (row 0): click the view indicator dots ─────────────────
+	// Layout: 1(pad) + 8(logo) + 3(sep) = col 12 where view dots start.
+	// Each dot: "● VIEW" or "○ VIEW" with a 2-char gap between.
+	if y == 0 {
+		labels := []string{"TIDE", "ALMANAC", "STATION"}
+		x0 := 1 + 8 + 3 // left-padding + logo + separator
+		for i, label := range labels {
+			w := 2 + len(label) // "● " + label
+			if x >= x0 && x < x0+w {
+				m.activeView = View(i)
+				m.showPicker = false
+				return cmds
+			}
+			x0 += w + 2 // "  " between dots
+		}
+	}
+
+	body := y - 1 // body coordinate (0 = first line of body area)
+	if body < 0 {
+		return cmds
+	}
+
+	// ── Station picker: click on a nearby station row ──────────────────────
+	// Picker layout (body rows):
+	//   0: blank, 1: title, 2: blank, 3: input, 4: blank,
+	//   5: "NEARBY STATIONS", 6: blank, 7+: items
+	if m.showPicker {
+		const pickerItemsStartRow = 7
+		idx := body - pickerItemsStartRow
+		if idx >= 0 && idx < len(m.nearbyStations) {
+			m.pickerCursor = idx
+			cmds = append(cmds, m.applyPickerSelection()...)
+		}
+		return cmds
+	}
+
+	// ── Almanac view: click on a day row to move the cursor ───────────────
+	// Almanac body layout:
+	//   0: blank, 1: section header, 2: column header,
+	//   3 (or 4 if scroll indicator shown): first data row
+	if m.activeView == ViewAlmanac {
+		visibleRows := m.bodyHeight() - 5
+		if visibleRows < 1 {
+			visibleRows = 1
+		}
+		offset := ui.AlmanacScrollOffset(m.almanacCursor, visibleRows, len(m.dailyTides))
+		topIndicator := 0
+		if offset > 0 {
+			topIndicator = 1
+		}
+		dataStart := 3 + topIndicator // body row where first data day appears
+		dayRow := body - dataStart
+		if dayRow >= 0 {
+			dayIdx := dayRow + offset
+			if dayIdx >= 0 && dayIdx < len(m.dailyTides) {
+				m.almanacCursor = dayIdx
+			}
+		}
+	}
+
+	return cmds
 }
 
 func errClearCmd() tea.Cmd {
