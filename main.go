@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"math/rand"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/mogglemoss/fathom/config"
 	"github.com/mogglemoss/fathom/model"
+	"github.com/mogglemoss/fathom/noaa"
 	"github.com/mogglemoss/fathom/server"
 	"github.com/mogglemoss/fathom/ui"
 )
@@ -44,13 +47,23 @@ func main() {
 		os.Exit(0)
 	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		cfg = config.DefaultConfig()
-	}
+	cfg, loadErr := config.Load()
+	firstRun := loadErr != nil
 
 	if *stationFlag != "" {
 		cfg.StationID = *stationFlag
+	} else if firstRun {
+		// First run: auto-detect nearest NOAA station from IP geolocation.
+		fmt.Print("  ◈ fathom  detecting nearest station… ")
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if id, err := noaa.NearestWaterLevelStation(ctx); err == nil {
+			cfg.StationID = id
+			fmt.Println("found " + id)
+		} else {
+			fmt.Println("using default (Boston)")
+		}
+		_ = config.Save(cfg)
 	}
 
 	// Theme priority: --theme flag > omarchy (auto-detected in initStyles) > config > default

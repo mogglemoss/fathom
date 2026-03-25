@@ -190,7 +190,8 @@ func (m Model) View() string {
 	}
 
 	currentLevel, hasLevel := m.currentLevel()
-	statusBar := ui.RenderStatusBar(m.station, currentLevel, hasLevel, m.errMsg, m.lastUpdated, m.width, m.refreshFlash)
+	direction := ui.TideDirection(m.waterObs)
+	statusBar := ui.RenderStatusBar(m.station, currentLevel, hasLevel, direction, m.errMsg, m.lastUpdated, m.width, m.refreshFlash, int(m.activeView))
 	helpBar := ui.RenderHelpBar(m.width, m.showHelp)
 	bodyH := m.bodyHeight()
 

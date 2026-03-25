@@ -3,11 +3,20 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/mogglemoss/fathom/noaa"
 )
+
+// significantPhaseNames are moon phases that get their full name displayed.
+var significantPhaseNames = map[string]bool{
+	"New Moon":      true,
+	"First Quarter": true,
+	"Full Moon":     true,
+	"Last Quarter":  true,
+}
 
 // RenderAlmanacView renders the 7–14 day tide forecast.
 func RenderAlmanacView(
@@ -31,8 +40,8 @@ func RenderAlmanacView(
 		cursor = len(days) - 1
 	}
 
-	// How many rows fit in the available height (minus 2 for header + padding)
-	visibleRows := height - 3
+	// How many rows fit in the available height (minus header + padding)
+	visibleRows := height - 4
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
@@ -51,32 +60,60 @@ func RenderAlmanacView(
 
 	b.WriteString(S.SectionHeader.Render("  TIDE FORECAST") + "\n\n")
 
+	// Top scroll indicator
+	if offset > 0 {
+		b.WriteString(S.HelpDesc.Render(fmt.Sprintf("  ▲ %d more above", offset)) + "\n")
+	}
+
 	end := offset + visibleRows
 	if end > len(days) {
 		end = len(days)
 	}
 
+	today := time.Now()
+	todayStr := today.Format("2006-01-02")
+
 	for i := offset; i < end; i++ {
-		row := renderAlmanacRow(days[i], width, i == cursor)
+		isToday := days[i].Date.Format("2006-01-02") == todayStr
+		row := renderAlmanacRow(days[i], width, i == cursor, isToday)
 		b.WriteString(row + "\n")
 	}
 
-	// Scroll hints
-	if offset > 0 {
-		// Overwrite first rendered row hint — instead just add indicator at bottom
-	}
+	// Bottom scroll indicator
 	if end < len(days) {
-		b.WriteString(S.HelpDesc.Render("  ▼ more  (" + fmt.Sprintf("%d", len(days)-end) + " days)"))
+		b.WriteString(S.HelpDesc.Render(fmt.Sprintf("  ▼ %d more below", len(days)-end)))
 	}
 
 	return b.String()
 }
 
-func renderAlmanacRow(day noaa.DailyTide, width int, selected bool) string {
+func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool) string {
+	// Date — bold for today
 	dateStr := day.Date.Format("Mon Jan  2")
+	var dateRendered string
+	if isToday {
+		dateRendered = lipgloss.NewStyle().Foreground(S.T.Accent).Bold(true).Render(dateStr)
+	} else {
+		dateRendered = S.AlmanacDate.Render(dateStr)
+	}
 
-	// Build tide events string
+	// Tide events
 	var tides strings.Builder
+	var maxHigh, minLow float64
+	hasHigh, hasLow := false, false
+	for _, p := range day.Predictions {
+		if p.IsHigh {
+			if !hasHigh || p.Level > maxHigh {
+				maxHigh = p.Level
+				hasHigh = true
+			}
+		} else {
+			if !hasLow || p.Level < minLow {
+				minLow = p.Level
+				hasLow = true
+			}
+		}
+	}
 	for _, p := range day.Predictions {
 		if tides.Len() > 0 {
 			tides.WriteString("  ")
@@ -90,19 +127,26 @@ func renderAlmanacRow(day noaa.DailyTide, width int, selected bool) string {
 		}
 	}
 
-	// Moon glyph and name
-	moonGlyph := day.MoonName[:1] // safe default
-	_ = moonGlyph
+	// Tidal range
+	rangeStr := ""
+	if hasHigh && hasLow {
+		rangeStr = "  " + S.Label.Render(fmt.Sprintf("%.1f ft", maxHigh-minLow))
+	}
+
+	// Moon: glyph always; name only for significant phases
 	moonStr := ""
 	if day.MoonName != "" {
 		glyph := moonPhaseGlyph(day.MoonPhase)
-		moonStr = "  " + S.AlmanacMoon.Render(glyph+" "+day.MoonName)
+		if significantPhaseNames[day.MoonName] {
+			moonStr = "  " + S.AlmanacMoon.Render(glyph+" "+day.MoonName)
+		} else {
+			moonStr = "  " + S.AlmanacMoon.Render(glyph)
+		}
 	}
 
-	row := "  " + dateStr + "   " + tides.String() + moonStr
+	row := "  " + dateRendered + "   " + tides.String() + rangeStr + moonStr
 
 	if selected {
-		// Pad to full width so the selection background fills the row
 		rowWidth := lipgloss.Width(row)
 		if rowWidth < width-2 {
 			row += strings.Repeat(" ", width-2-rowWidth)
@@ -112,8 +156,8 @@ func renderAlmanacRow(day noaa.DailyTide, width int, selected bool) string {
 	return row
 }
 
-// moonPhaseGlyph returns a Unicode moon emoji. Duplicated here to avoid
-// importing the moon package from ui (keep ui dependency-free of business logic).
+// moonPhaseGlyph returns a Unicode moon emoji for the given phase fraction [0,1).
+// Duplicated here to keep ui free of moon package dependency.
 func moonPhaseGlyph(phase float64) string {
 	switch {
 	case phase < 0.0625 || phase >= 0.9375:
