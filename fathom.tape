@@ -13,16 +13,10 @@ Set TypingSpeed 80ms
 
 # Launch fathom with Boston station
 Hide
-Type "set -x PATH /Users/scott/go/bin $PATH"
+Type "/Users/scott/go/bin/fathom --station 8443970"
 Enter
-Sleep 500ms
+Sleep 5s
 Show
-Type "fathom --station 8443970"
-Enter
-Sleep 3s
-
-# Watch the tide view load
-Sleep 2s
 
 # Switch to Almanac
 Type "2"
