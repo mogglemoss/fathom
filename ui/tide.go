@@ -7,12 +7,16 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	colorful "github.com/lucasb-eyer/go-colorful"
 
 	"github.com/mogglemoss/fathom/noaa"
 )
 
 // blockChars are the 8 bottom-aligned vertical block characters, indexed 0 (▁) to 7 (█).
 var blockChars = []rune("▁▂▃▄▅▆▇█")
+
+// animFrames cycles for the "now" cursor star animation.
+var animFrames = []string{"✦", "✦", "✧", "✧"}
 
 var loadingMessages = []string{
 	"reaching into the water…",
@@ -41,6 +45,7 @@ func loadingMessage() string {
 //   - viewDate: the day being displayed (zero = today)
 //   - isToday: whether viewDate is today (precomputed by model)
 //   - nowFrac: fraction of day elapsed [0,1] — used to mark "now" on chart
+//   - animFrame: animation frame counter for the cursor star
 //   - width, height: terminal dimensions for this view
 func RenderTideView(
 	obs []noaa.WaterObs,
@@ -51,18 +56,20 @@ func RenderTideView(
 	viewDate time.Time,
 	isToday bool,
 	nowFrac float64,
+	animFrame int,
 	width int,
 	height int,
 ) string {
 	// Chart overhead = pre-chart lines + post-chart lines.
 	//   Today (no met): 5 pre  +  3 post  = 8
 	//   Today (met):    5 pre  +  5 post  = 10  (met strip adds \n\n + text + \n = 2 extra)
-	//   Non-today:      4 pre  +  3 post  = 7
+	//   Non-today:      4 pre  +  3 post  = 7   (stale)
+	//   Non-today non-stale: also 8 (gains chart-markers row)
 	hasMet := isToday && (met.WindSpeed > 0 || met.AirTemp != 0 || met.AirPressure != 0)
 	overhead := 8
 	if hasMet {
 		overhead = 10
-	} else if !isToday {
+	} else if !isToday && dayCurveStale {
 		overhead = 7
 	}
 	chartH := height - overhead
@@ -116,7 +123,7 @@ func RenderTideView(
 			if dayHigh != nil {
 				b.WriteString(S.TideHigh.Render("HIGH") + "  " +
 					S.Value.Render(fmt.Sprintf("%.1f ft", dayHigh.Level)) + "  " +
-					S.Label.Render(fmtTideTime(dayHigh.Time)))
+					S.Label.Render(FmtTideTime(dayHigh.Time)))
 			}
 			if dayHigh != nil && dayLow != nil {
 				b.WriteString(S.Label.Render("     "))
@@ -124,7 +131,7 @@ func RenderTideView(
 			if dayLow != nil {
 				b.WriteString(S.TideLow.Render("LOW ") + "  " +
 					S.Value.Render(fmt.Sprintf("%.1f ft", dayLow.Level)) + "  " +
-					S.Label.Render(fmtTideTime(dayLow.Time)))
+					S.Label.Render(FmtTideTime(dayLow.Time)))
 			}
 			b.WriteString("\n")
 		} else {
@@ -150,21 +157,46 @@ func RenderTideView(
 		return b.String()
 	}
 
+	// Compute peak and trough column positions for the marker row.
+	availWidthForMarkers := width - 4
+	if availWidthForMarkers < 1 {
+		availWidthForMarkers = 1
+	}
+	nForMarkers := len(dayCurve)
+	if availWidthForMarkers > nForMarkers {
+		availWidthForMarkers = nForMarkers
+	}
+	peakCol, troughCol := 0, 0
+	if nForMarkers > 0 {
+		for i := range dayCurve {
+			if dayCurve[i].Level > dayCurve[peakCol].Level {
+				peakCol = i
+			}
+			if dayCurve[i].Level < dayCurve[troughCol].Level {
+				troughCol = i
+			}
+		}
+		peakCol = peakCol * availWidthForMarkers / nForMarkers
+		troughCol = troughCol * availWidthForMarkers / nForMarkers
+	}
+
 	// ── Row 4 (today) / Row 3 (non-today): now-marker or stale indicator ──
-	// Today:     now-marker shows "now" position; stale → loading hint instead.
-	// Non-today: stale → loading hint in the blank slot; otherwise nothing here.
+	// Today:     chart-markers row shows ▲ peak, ▼ trough, ▾ now; stale → loading hint instead.
+	// Non-today: show peak/trough markers when not stale; stale → loading hint.
 	if isToday && !dayCurveStale {
-		b.WriteString(renderNowMarker(nowFrac, dayCurve, width) + "\n")
+		b.WriteString(renderChartMarkers(nowFrac, true, peakCol, troughCol, availWidthForMarkers) + "\n")
+	} else if !isToday && !dayCurveStale && len(dayCurve) > 0 {
+		b.WriteString(renderChartMarkers(nowFrac, false, peakCol, troughCol, availWidthForMarkers) + "\n")
 	} else if dayCurveStale {
 		b.WriteString("  " + S.StatusMeta.Render(loadingMessage()) + "\n")
 	}
 
 	// ── The chart ─────────────────────────────────────────────────────────
-	b.WriteString(renderDayCurve(dayCurve, isToday && !dayCurveStale, nowFrac, width, chartH, dayCurveStale))
+	b.WriteString(renderDayCurve(dayCurve, isToday && !dayCurveStale, nowFrac, width, chartH, animFrame, dayCurveStale))
 
 	// ── Time axis ─────────────────────────────────────────────────────────
 	b.WriteString("\n")
-	b.WriteString(renderTimeAxis(width))
+	b.WriteString(renderTimeAxis(width, Use24h))
 
 	// ── Level stats ───────────────────────────────────────────────────────
 	b.WriteString("\n")
@@ -223,69 +255,95 @@ func renderDateNav(viewDate time.Time, isToday bool, width int) string {
 	return leftPart + strings.Repeat(" ", leftPad) + center + strings.Repeat(" ", rightPad) + rightPart
 }
 
-// renderNowMarker renders a row with ▾ at the current time column.
-func renderNowMarker(nowFrac float64, dayCurve []noaa.WaterObs, width int) string {
-	availWidth := width - 4
-	if availWidth < 1 {
-		availWidth = 1
-	}
-	n := len(dayCurve)
-	if availWidth > n {
-		availWidth = n
+// renderChartMarkers renders the row above the chart with ▲ at peak, ▼ at trough,
+// and ▾ at the current time (today only).
+func renderChartMarkers(nowFrac float64, isToday bool, peakCol, troughCol, availWidth int) string {
+	if availWidth <= 0 {
+		return ""
 	}
 
-	nowCol := int(nowFrac * float64(availWidth))
-	if nowCol >= availWidth {
-		nowCol = availWidth - 1
+	row := make([]string, availWidth)
+
+	if peakCol >= 0 && peakCol < availWidth {
+		row[peakCol] = S.TideHigh.Render("▲")
 	}
-	return "  " + strings.Repeat(" ", nowCol) + S.SparkCursor.Render("▾")
+	if troughCol >= 0 && troughCol < availWidth {
+		row[troughCol] = S.TideLow.Render("▼")
+	}
+	if isToday {
+		nowCol := int(nowFrac * float64(availWidth))
+		if nowCol >= availWidth {
+			nowCol = availWidth - 1
+		}
+		if nowCol >= 0 {
+			row[nowCol] = S.SparkCursor.Render("▾") // nowCol takes priority
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("  ")
+	for _, c := range row {
+		if c == "" {
+			sb.WriteString(" ")
+		} else {
+			sb.WriteString(c)
+		}
+	}
+	return sb.String()
 }
 
-// renderTimeAxis renders the midnight / lunch / midnight row below the chart.
-func renderTimeAxis(width int) string {
+// renderTimeAxis renders the time axis below the chart with 5 labeled positions.
+func renderTimeAxis(width int, use24h bool) string {
 	availWidth := width - 4
 	if availWidth < 20 {
-		return "  " + S.Label.Render("midnight ── lunch ── midnight")
+		if use24h {
+			return "  " + S.Label.Render("00:00 ── 12:00 ── 24:00")
+		}
+		return "  " + S.Label.Render("12am ── 12pm ── 12am")
 	}
 
-	const (
-		left   = "midnight"
-		middle = "lunch"
-		right  = "midnight"
-	)
-
-	midPos := availWidth/2 - len(middle)/2
-	rightPos := availWidth - len(right)
-	if midPos < len(left)+1 {
-		midPos = len(left) + 1
-	}
-	if rightPos < midPos+len(middle)+1 {
-		rightPos = midPos + len(middle) + 1
+	var labels [5]string
+	if use24h {
+		labels = [5]string{"00:00", "06:00", "12:00", "18:00", "24:00"}
+	} else {
+		labels = [5]string{"12am", "6am", "12pm", "6pm", "12am"}
 	}
 
-	axis := left
-	for len(axis) < midPos {
-		axis += " "
+	// Target positions: 0%, 25%, 50%, 75%, 100% of availWidth.
+	// Labels 1-3 are centered on their position; label 0 is left-aligned; label 4 is right-aligned.
+	positions := [5]int{
+		0,
+		availWidth/4 - len(labels[1])/2,
+		availWidth/2 - len(labels[2])/2,
+		3*availWidth/4 - len(labels[3])/2,
+		availWidth - len(labels[4]),
 	}
-	axis += middle
-	for len(axis) < rightPos {
-		axis += " "
+	// Clamp: ensure no overlap and no out-of-bounds.
+	for i := range positions {
+		if positions[i] < 0 {
+			positions[i] = 0
+		}
+		if i > 0 && positions[i] < positions[i-1]+len(labels[i-1])+1 {
+			positions[i] = positions[i-1] + len(labels[i-1]) + 1
+		}
+		if positions[i]+len(labels[i]) > availWidth {
+			positions[i] = availWidth - len(labels[i])
+		}
 	}
-	axis += right
 
-	return "  " + S.Label.Render(axis)
+	buf := []byte(strings.Repeat(" ", availWidth))
+	for i, label := range labels {
+		pos := positions[i]
+		for j := 0; j < len(label) && pos+j < availWidth; j++ {
+			buf[pos+j] = label[j]
+		}
+	}
+	return "  " + S.Label.Render(string(buf))
 }
 
-// renderDayCurve renders the full-day (midnight-to-midnight) tide chart.
-//
-// The chart uses blockChars (▁▂▃▄▅▆▇█) for 8× vertical precision.
-// For today, columns are colored by temporal position:
-//   - past: SparkHigh (above mean) or SparkLow (below mean) — vivid
-//   - current: SparkCursor — bright glow
-//   - future: SparkFuture — dim, like peering into dark water
-//
-// For other days, all columns use SparkHigh/SparkLow based on mean.
-func renderDayCurve(dayCurve []noaa.WaterObs, isToday bool, nowFrac float64, width, chartHeight int, stale bool) string {
+// renderDayCurve renders the full-day tide chart with height gradient, animated
+// now-cursor, and optional MLLW zero-line.
+func renderDayCurve(dayCurve []noaa.WaterObs, isToday bool, nowFrac float64, width, chartHeight, animFrame int, stale bool) string {
 	if len(dayCurve) == 0 {
 		return S.Label.Render("  awaiting tide curve…")
 	}
@@ -294,33 +352,47 @@ func renderDayCurve(dayCurve []noaa.WaterObs, isToday bool, nowFrac float64, wid
 	for i, o := range dayCurve {
 		levels[i] = o.Level
 	}
-	minVal, maxVal, meanVal := stats(levels)
+	minVal, maxVal, _ := stats(levels)
 
 	availWidth := width - 4
 	if availWidth < 1 {
 		availWidth = 1
 	}
-
-	// Scale data columns to terminal width.
 	n := len(levels)
 	if availWidth > n {
 		availWidth = n
 	}
 
-	// Sample uniformly if more data points than columns.
+	// Catmull-Rom spline sampling: smoothly interpolate between source points
+	// rather than snapping to the nearest index (removes staircase artifacts).
 	sampled := make([]float64, availWidth)
 	for i := range sampled {
-		srcIdx := i * n / availWidth
-		sampled[i] = levels[srcIdx]
+		// Map column i to a fractional position in the source slice.
+		srcFrac := float64(i) * float64(n-1) / math.Max(1, float64(availWidth-1))
+		j := int(srcFrac)
+		t := srcFrac - float64(j)
+		// Clamp surrounding control-point indices.
+		j0 := j - 1
+		if j0 < 0 {
+			j0 = 0
+		}
+		j1 := j
+		j2 := j + 1
+		if j2 >= n {
+			j2 = n - 1
+		}
+		j3 := j + 2
+		if j3 >= n {
+			j3 = n - 1
+		}
+		sampled[i] = catmullRom(levels[j0], levels[j1], levels[j2], levels[j3], t)
 	}
 
-	// Compute nowCol: which column represents "now".
 	nowCol := int(nowFrac * float64(availWidth))
 	if nowCol >= availWidth {
 		nowCol = availWidth - 1
 	}
 
-	// Compute scaled heights [0, chartHeight] with floor so min is never invisible.
 	const floorFrac = 0.5 / 8
 	sh := make([]float64, availWidth)
 	for i, v := range sampled {
@@ -328,6 +400,73 @@ func renderDayCurve(dayCurve []noaa.WaterObs, isToday bool, nowFrac float64, wid
 			sh[i] = (v-minVal)/(maxVal-minVal)*float64(chartHeight)*(1-floorFrac) + floorFrac
 		} else {
 			sh[i] = float64(chartHeight) / 2
+		}
+	}
+
+	// Gaussian blur (σ≈1, 5-point kernel) on the display heights to soften
+	// any remaining quantisation edges without distorting the overall shape.
+	if availWidth >= 3 {
+		kernel := [5]float64{0.06, 0.24, 0.40, 0.24, 0.06}
+		blurred := make([]float64, availWidth)
+		for i := range sh {
+			var sum, weight float64
+			for k, w := range kernel {
+				idx := i + k - 2
+				if idx < 0 {
+					idx = 0
+				}
+				if idx >= availWidth {
+					idx = availWidth - 1
+				}
+				sum += w * sh[idx]
+				weight += w
+			}
+			blurred[i] = sum / weight
+		}
+		copy(sh, blurred)
+	}
+
+	// Pre-compute gradient styles per row.
+	// Row 0 = top (bright) → Row chartHeight-1 = bottom (dark).
+	pastBotC, _ := colorful.Hex("#003459") // deep ocean navy
+	pastTopC, _ := colorful.Hex("#00DFFF") // phosphor cyan
+	futBotC, _ := colorful.Hex("#001828")  // midnight deep
+	futTopC, _ := colorful.Hex("#005F80")  // ocean teal
+
+	type rowStyle struct{ past, fut lipgloss.Style }
+	rowStyles := make([]rowStyle, chartHeight)
+	for r := 0; r < chartHeight; r++ {
+		t := 1.0
+		if chartHeight > 1 {
+			t = float64(r) / float64(chartHeight-1)
+		}
+		pc := pastTopC.BlendHcl(pastBotC, t).Clamped()
+		fc := futTopC.BlendHcl(futBotC, t).Clamped()
+		rowStyles[r] = rowStyle{
+			past: lipgloss.NewStyle().Foreground(lipgloss.Color(pc.Hex())),
+			fut:  lipgloss.NewStyle().Foreground(lipgloss.Color(fc.Hex())),
+		}
+	}
+
+	// Zero-line row: draw a dim ─ at the MLLW datum when it falls within the chart.
+	zeroRow := -1
+	if maxVal > minVal && minVal < 0 && maxVal > 0 {
+		zeroFrac := -minVal / (maxVal - minVal)
+		zr := chartHeight - 1 - int(zeroFrac*float64(chartHeight))
+		if zr >= 0 && zr < chartHeight {
+			zeroRow = zr
+		}
+	}
+
+	// Animated star: which frame to show at the now-cursor tip.
+	star := animFrames[animFrame%len(animFrames)]
+
+	// Pre-compute the topmost row of the now-column bar.
+	nowTopRow := -1
+	if isToday && !stale && nowCol >= 0 {
+		nowTopRow = chartHeight - 1 - int(sh[nowCol])
+		if nowTopRow < 0 {
+			nowTopRow = 0
 		}
 	}
 
@@ -344,46 +483,38 @@ func renderDayCurve(dayCurve []noaa.WaterObs, isToday bool, nowFrac float64, wid
 		rowTop := float64(chartHeight - row)
 
 		for i, s := range sh {
-			above := sampled[i] >= meanVal
-
-			// Determine style by temporal zone.
-			// Stale data (wrong date, fetch in-flight) always uses dim SparkFuture.
+			// Determine base style from gradient.
 			var style lipgloss.Style
 			if stale {
-				style = S.SparkFuture
+				style = rowStyles[row].fut
 			} else if isToday {
 				switch {
 				case i == nowCol:
 					style = S.SparkCursor
 				case i < nowCol:
-					if above {
-						style = S.SparkHigh
-					} else {
-						style = S.SparkLow
-					}
+					style = rowStyles[row].past
 				default:
-					style = S.SparkFuture
+					style = rowStyles[row].fut
 				}
 			} else {
-				if above {
-					style = S.SparkHigh
-				} else {
-					style = S.SparkLow
-				}
+				style = rowStyles[row].past
+			}
+
+			// Animated star at the top of the now-column.
+			if isToday && !stale && i == nowCol && row == nowTopRow {
+				sb.WriteString(S.SparkCursor.Render(star))
+				continue
 			}
 
 			switch {
 			case s >= rowTop:
 				sb.WriteString(style.Render("█"))
 			case s > rowBot:
-				sRender := s
-				// Dither: on shallow slopes, alternate odd columns half a step up
-				// to soften visible stairstepping on nearly-flat sections.
-				if i > 0 && math.Abs(s-sh[i-1]) < 0.5 && i%2 == 1 {
-					sRender = math.Min(rowTop-0.001, s+0.0625)
-				}
-				frac := sRender - rowBot
-				idx := int(frac * 8)
+				frac := s - rowBot
+				// Round to nearest of 8 levels (0-7) rather than truncating,
+				// so the transition between adjacent block chars is centred on
+				// the actual height rather than always biased low.
+				idx := int(math.Round(frac*8 - 0.5))
 				if idx < 0 {
 					idx = 0
 				}
@@ -392,7 +523,11 @@ func renderDayCurve(dayCurve []noaa.WaterObs, isToday bool, nowFrac float64, wid
 				}
 				sb.WriteString(style.Render(string(blockChars[idx])))
 			default:
-				sb.WriteString(" ")
+				if row == zeroRow {
+					sb.WriteString(S.Label.Render("─"))
+				} else {
+					sb.WriteString(" ")
+				}
 			}
 		}
 	}
@@ -524,6 +659,17 @@ func windArrow(fromDeg float64) string {
 	toward := math.Mod(fromDeg+180, 360)
 	idx := int((toward+22.5)/45) % 8
 	return []string{"↑", "↗", "→", "↘", "↓", "↙", "←", "↖"}[idx]
+}
+
+// catmullRom interpolates a point at parameter t (0–1) between p1 and p2,
+// using p0 and p3 as the outer control points (Catmull-Rom spline).
+func catmullRom(p0, p1, p2, p3, t float64) float64 {
+	t2 := t * t
+	t3 := t2 * t
+	return 0.5 * ((2*p1) +
+		(-p0+p2)*t +
+		(2*p0-5*p1+4*p2-p3)*t2 +
+		(-p0+3*p1-3*p2+p3)*t3)
 }
 
 func stats(v []float64) (min, max, mean float64) {
