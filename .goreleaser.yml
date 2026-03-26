@@ -43,6 +43,7 @@ changelog:
 
 brews:
   - name: fathom
+    directory: Formula
     repository:
       owner: mogglemoss
       name: homebrew-tap
