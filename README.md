@@ -8,7 +8,14 @@ A terminal tide dashboard powered by NOAA. Three views — live tides, 14-day al
 
 ---
 
-![fathom](./assets/fathom.gif)
+### Tide
+![fathom tide view](./assets/fathom-tide.png)
+
+### Almanac
+![fathom almanac view](./assets/fathom-almanac.png)
+
+### Station
+![fathom station view](./assets/fathom-station.png)
 
 ---
 
