@@ -9,12 +9,15 @@ type Theme struct {
 	HighTide lipgloss.Color // high tide markers
 	LowTide  lipgloss.Color // low tide markers
 
-	Accent        lipgloss.Color        // logo, section headers
+	Accent        lipgloss.Color         // logo, section headers
 	AccentSubtle  lipgloss.AdaptiveColor // help keys, labels
 	Selected      lipgloss.AdaptiveColor // selected row background
 	Border        lipgloss.AdaptiveColor // panel borders
 	TextPrimary   lipgloss.AdaptiveColor
 	TextSecondary lipgloss.AdaptiveColor
+
+	SparkFuture lipgloss.Color         // future prediction bars — deep ocean teal
+	TableAlt    lipgloss.AdaptiveColor // subtle alternating row background
 
 	Good lipgloss.Color // verified data, no errors
 	Warn lipgloss.Color // preliminary data, warnings
@@ -43,6 +46,9 @@ var Default = Theme{
 	Border:        lipgloss.AdaptiveColor{Light: "#B0C8D0", Dark: "#1C3D50"},
 	TextPrimary:   lipgloss.AdaptiveColor{Light: "#1A2830", Dark: "#C4E8F0"},
 	TextSecondary: lipgloss.AdaptiveColor{Light: "#5A7480", Dark: "#4D7888"},
+
+	SparkFuture: lipgloss.Color("#005F80"), // deep ocean teal — future predictions
+	TableAlt:    lipgloss.AdaptiveColor{Light: "#E8F4F8", Dark: "#0A1C2A"},
 
 	Good: lipgloss.Color("#00C985"),
 	Warn: lipgloss.Color("#FFAA00"), // amber warning lamp
@@ -82,6 +88,7 @@ type Styles struct {
 	AlmanacLow    lipgloss.Style
 	AlmanacMoon   lipgloss.Style
 	AlmanacCursor lipgloss.Style
+	AlmanacAlt    lipgloss.Style // subtle alternating row background
 
 	// Met strip
 	MetLabel lipgloss.Style
@@ -123,28 +130,29 @@ func New(t Theme) Styles {
 	s.TideFalling = lipgloss.NewStyle().Foreground(t.Falling).Bold(true)
 	s.TideHigh = lipgloss.NewStyle().Foreground(t.HighTide)
 	s.TideLow = lipgloss.NewStyle().Foreground(t.LowTide)
-	s.SparkHigh = lipgloss.NewStyle().Foreground(t.Rising)
+	s.SparkHigh = lipgloss.NewStyle().Foreground(t.HighTide) // phosphor cyan — vivid, oceanic
 	s.SparkLow = lipgloss.NewStyle().Foreground(t.Falling)
-	// Future: dim secondary color — clearly muted vs vivid past, uncertain depth
-	s.SparkFuture = lipgloss.NewStyle().Foreground(t.TextSecondary)
+	// Future: deep ocean teal — clearly muted vs vivid past, like peering into dark water
+	s.SparkFuture = lipgloss.NewStyle().Foreground(t.SparkFuture)
 	s.SparkCursor = lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
 
 	// Almanac
 	s.AlmanacDate = lipgloss.NewStyle().Foreground(t.TextPrimary)
 	s.AlmanacHigh = lipgloss.NewStyle().Foreground(t.HighTide)
 	s.AlmanacLow = lipgloss.NewStyle().Foreground(t.LowTide)
-	s.AlmanacMoon = lipgloss.NewStyle().Foreground(t.Accent)
+	s.AlmanacMoon = lipgloss.NewStyle().Foreground(t.TextSecondary) // dimmer — reference glyph, not primary data
 	s.AlmanacCursor = lipgloss.NewStyle().
 		Background(t.Selected).
 		Foreground(t.Accent).
 		Bold(true)
+	s.AlmanacAlt = lipgloss.NewStyle().Background(t.TableAlt)
 
 	// Met strip
 	s.MetLabel = lipgloss.NewStyle().Foreground(t.TextSecondary)
 	s.MetValue = lipgloss.NewStyle().Foreground(t.TextPrimary)
 
 	// Help bar
-	s.HelpKey = lipgloss.NewStyle().Foreground(t.AccentSubtle).Bold(true)
+	s.HelpKey = lipgloss.NewStyle().Foreground(t.AccentSubtle)
 	s.HelpDesc = lipgloss.NewStyle().Foreground(t.TextSecondary)
 	s.HelpSep = lipgloss.NewStyle().Foreground(t.Border)
 
@@ -170,6 +178,8 @@ var Presets = map[string]Theme{
 		Border:        lipgloss.AdaptiveColor{Light: "#bcc0cc", Dark: "#45475a"},
 		TextPrimary:   lipgloss.AdaptiveColor{Light: "#4c4f69", Dark: "#cdd6f4"},
 		TextSecondary: lipgloss.AdaptiveColor{Light: "#6c6f85", Dark: "#9399b2"},
+		SparkFuture:   lipgloss.Color("#4a6fa5"),
+		TableAlt:      lipgloss.AdaptiveColor{Light: "#eff1f5", Dark: "#25253c"},
 		Good:          lipgloss.Color("#a6e3a1"),
 		Warn:          lipgloss.Color("#f9e2af"),
 		Bad:           lipgloss.Color("#f38ba8"),
@@ -185,6 +195,8 @@ var Presets = map[string]Theme{
 		Border:        lipgloss.AdaptiveColor{Light: "#6272a4", Dark: "#6272a4"},
 		TextPrimary:   lipgloss.AdaptiveColor{Light: "#282a36", Dark: "#f8f8f2"},
 		TextSecondary: lipgloss.AdaptiveColor{Light: "#6272a4", Dark: "#6272a4"},
+		SparkFuture:   lipgloss.Color("#4d6ea0"),
+		TableAlt:      lipgloss.AdaptiveColor{Light: "#f8f8f2", Dark: "#3a3c4e"},
 		Good:          lipgloss.Color("#50fa7b"),
 		Warn:          lipgloss.Color("#f1fa8c"),
 		Bad:           lipgloss.Color("#ff5555"),
@@ -200,6 +212,8 @@ var Presets = map[string]Theme{
 		Border:        lipgloss.AdaptiveColor{Light: "#d8dee9", Dark: "#4c566a"},
 		TextPrimary:   lipgloss.AdaptiveColor{Light: "#2e3440", Dark: "#eceff4"},
 		TextSecondary: lipgloss.AdaptiveColor{Light: "#4c566a", Dark: "#7b88a1"},
+		SparkFuture:   lipgloss.Color("#4c566a"),
+		TableAlt:      lipgloss.AdaptiveColor{Light: "#e5e9f0", Dark: "#32394a"},
 		Good:          lipgloss.Color("#a3be8c"),
 		Warn:          lipgloss.Color("#ebcb8b"),
 		Bad:           lipgloss.Color("#bf616a"),

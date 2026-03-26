@@ -56,16 +56,18 @@ func LoadOmarchyTheme() (Theme, bool) {
 	}
 
 	return Theme{
-		Rising:        lipgloss.Color(c["color2"]),   // green
-		Falling:       lipgloss.Color(c["color4"]),   // blue
-		HighTide:      lipgloss.Color(c["color6"]),   // cyan
-		LowTide:       lipgloss.Color(c["color12"]),  // bright blue
+		Rising:        lipgloss.Color(c["color2"]),  // green
+		Falling:       lipgloss.Color(c["color4"]),  // blue
+		HighTide:      lipgloss.Color(c["color6"]),  // cyan
+		LowTide:       lipgloss.Color(c["color12"]), // bright blue
 		Accent:        lipgloss.Color(accent),
-		AccentSubtle:  adaptive(c["color5"]),          // magenta/purple
+		AccentSubtle:  adaptive(c["color5"]), // magenta/purple
 		Selected:      adaptive(selectedBg),
 		Border:        adaptive(border),
 		TextPrimary:   adaptive(c["foreground"]),
 		TextSecondary: adaptive(c["color8"]),
+		SparkFuture:   lipgloss.Color(c["color4"]), // blue family, dim for future predictions
+		TableAlt:      adaptive(c["color0"]),        // darkest terminal color
 		Good:          lipgloss.Color(c["color2"]),
 		Warn:          lipgloss.Color(c["color3"]),
 		Bad:           lipgloss.Color(c["color1"]),

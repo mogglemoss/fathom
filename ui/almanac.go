@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -25,11 +26,11 @@ var significantPhaseNames = map[string]bool{
 //	date:  "Mon Jan _2"     → always 10 chars  (Go _2 = space-padded day)
 //	event: "  ▲  4:32p  5.8" → 16 chars each
 //	       2(sep) + 1(▲) + 1(sp) + 6(time) + 1(sp) + 5(level) = 16
-//	range: "   5.8ft"        → 8 chars
+//	range: "   5.8ft ▓▓▓░░"  → 14 chars: 8 (number) + 6 (inline bar)
 const (
 	almDateW  = 10
 	almEvtW   = 16 // includes 2-char leading separator
-	almRangeW = 8
+	almRangeW = 14 // 8 (number) + 6 (inline bar)
 )
 
 // almEvtHdr is the column header string for each event slot (16 chars).
@@ -104,18 +105,42 @@ func RenderAlmanacView(
 	for range make([]struct{}, maxEvents) {
 		b.WriteString(S.Label.Render(almEvtHdr))
 	}
-	b.WriteString(S.Label.Render("  RANGE") + "\n")
+	b.WriteString(S.Label.Render("  RANGE        ") + "\n")
 
 	// ── Top scroll indicator ──────────────────────────────────────────────
 	if offset > 0 {
 		b.WriteString(S.HelpDesc.Render(fmt.Sprintf("  ▲ %d days above", offset)) + "\n")
 	}
 
+	// ── Compute maxRange across the visible window (for proportional bar) ──
+	var maxRange float64
+	for i := offset; i < end; i++ {
+		var hi, lo float64
+		hasH, hasL := false, false
+		for _, p := range days[i].Predictions {
+			if p.IsHigh && (!hasH || p.Level > hi) {
+				hi = p.Level
+				hasH = true
+			}
+			if !p.IsHigh && (!hasL || p.Level < lo) {
+				lo = p.Level
+				hasL = true
+			}
+		}
+		if hasH && hasL && hi-lo > maxRange {
+			maxRange = hi - lo
+		}
+	}
+
 	// ── Data rows ─────────────────────────────────────────────────────────
 	todayStr := time.Now().Format("2006-01-02")
+	prevMoonName := ""
 	for i := offset; i < end; i++ {
 		isToday := days[i].Date.Format("2006-01-02") == todayStr
-		b.WriteString(renderAlmanacRow(days[i], width, i == cursor, isToday, maxEvents) + "\n")
+		b.WriteString(renderAlmanacRow(days[i], width, i == cursor, isToday, maxEvents, prevMoonName, i-offset, maxRange) + "\n")
+		if days[i].MoonName != "" {
+			prevMoonName = days[i].MoonName
+		}
 	}
 
 	// ── Bottom scroll indicator ───────────────────────────────────────────
@@ -142,7 +167,7 @@ func AlmanacScrollOffset(cursor, visibleRows, totalDays int) int {
 	return offset
 }
 
-func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool, numEvents int) string {
+func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool, numEvents int, prevMoonName string, rowIdx int, maxRange float64) string {
 	// Sort predictions by time so columns are always in chronological order.
 	preds := make([]noaa.Prediction, len(day.Predictions))
 	copy(preds, day.Predictions)
@@ -199,9 +224,8 @@ func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool, num
 	// ── Range column ──────────────────────────────────────────────────────
 	var rangeStr string
 	if hasHigh && hasLow {
-		// "  X.Xft" or " XX.Xft" — use %5.1f for the number (5 chars) + "ft" = 7,
-		// but we add a 1-char space prefix → 8 chars total = almRangeW.
-		rangeStr = " " + S.Label.Render(fmt.Sprintf("%5.1fft", maxHigh-minLow))
+		rng := maxHigh - minLow
+		rangeStr = " " + S.Label.Render(fmt.Sprintf("%5.1fft", rng)) + S.Label.Render(rangeBar(rng, maxRange))
 	} else {
 		rangeStr = strings.Repeat(" ", almRangeW)
 	}
@@ -210,7 +234,9 @@ func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool, num
 	var moonStr string
 	if day.MoonName != "" {
 		glyph := moonPhaseGlyph(day.MoonPhase)
-		if significantPhaseNames[day.MoonName] {
+		// Show name only on first occurrence — suppress repeated consecutive labels.
+		showName := significantPhaseNames[day.MoonName] && day.MoonName != prevMoonName
+		if showName {
 			moonStr = "  " + S.AlmanacMoon.Render(glyph+" "+day.MoonName)
 		} else {
 			moonStr = "  " + S.AlmanacMoon.Render(glyph)
@@ -226,7 +252,27 @@ func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool, num
 		}
 		return S.AlmanacCursor.Render(row)
 	}
+	if rowIdx%2 == 1 {
+		rowWidth := lipgloss.Width(row)
+		if rowWidth < width-2 {
+			row += strings.Repeat(" ", width-2-rowWidth)
+		}
+		return S.AlmanacAlt.Render(row)
+	}
 	return row
+}
+
+// rangeBar returns a 6-char proportional bar (space + 5 block chars) showing
+// how rng compares to maxRange. Each ▓ = 20% of maxRange; remainder is ░.
+func rangeBar(rng, maxRange float64) string {
+	if maxRange <= 0 {
+		return " ░░░░░"
+	}
+	filled := int(math.Round(rng / maxRange * 5))
+	if filled > 5 {
+		filled = 5
+	}
+	return " " + strings.Repeat("▓", filled) + strings.Repeat("░", 5-filled)
 }
 
 // moonPhaseGlyph returns a Unicode moon emoji for the given synodic phase [0,1).

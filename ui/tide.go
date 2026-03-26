@@ -69,8 +69,8 @@ func RenderTideView(
 	if chartH < 4 {
 		chartH = 4
 	}
-	if chartH > 24 {
-		chartH = 24
+	if chartH > 28 {
+		chartH = 28
 	}
 
 	var b strings.Builder
@@ -376,7 +376,13 @@ func renderDayCurve(dayCurve []noaa.WaterObs, isToday bool, nowFrac float64, wid
 			case s >= rowTop:
 				sb.WriteString(style.Render("█"))
 			case s > rowBot:
-				frac := s - rowBot
+				sRender := s
+				// Dither: on shallow slopes, alternate odd columns half a step up
+				// to soften visible stairstepping on nearly-flat sections.
+				if i > 0 && math.Abs(s-sh[i-1]) < 0.5 && i%2 == 1 {
+					sRender = math.Min(rowTop-0.001, s+0.0625)
+				}
+				frac := sRender - rowBot
 				idx := int(frac * 8)
 				if idx < 0 {
 					idx = 0
