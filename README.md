@@ -8,7 +8,7 @@ A terminal tide dashboard powered by NOAA. Three views — live tides, 14-day al
 
 ---
 
-![fathom](./assets/fathom.gif)
+<video src="https://github.com/mogglemoss/fathom/releases/download/v0.2.1/fathom.mp4" autoplay loop muted playsinline></video>
 
 ---
 
