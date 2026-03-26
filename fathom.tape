@@ -2,7 +2,6 @@
 # Run with: vhs fathom.tape
 
 Output assets/fathom.gif
-Output assets/fathom.mp4
 
 Set Shell "fish"
 Set FontSize 14
