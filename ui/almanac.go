@@ -37,17 +37,6 @@ const (
 // It aligns TIME over the time field and FT over the level field.
 const almEvtHdr = "    TIME    FT  "
 
-// fmtTideTime formats a time.Time as " 4:32p" or "11:58a" — always 6 chars.
-// The a/p suffix makes AM vs PM unambiguous at a glance.
-func fmtTideTime(t time.Time) string {
-	sfx := "a"
-	if t.Hour() >= 12 {
-		sfx = "p"
-	}
-	// "3:04" gives 12h without leading zero (4–5 chars); pad to 5 with space.
-	return fmt.Sprintf("%5s%s", t.Format("3:04"), sfx)
-}
-
 // RenderAlmanacView renders the 7–14 day tide forecast in a fixed-width grid.
 func RenderAlmanacView(
 	days []noaa.DailyTide,
@@ -200,7 +189,7 @@ func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool, num
 				}
 				tideStr.WriteString(
 					S.AlmanacHigh.Render("▲") + " " +
-						S.Value.Render(fmtTideTime(p.Time)) + " " +
+						S.Value.Render(FmtTideTime(p.Time)) + " " +
 						S.AlmanacHigh.Render(fmt.Sprintf("%5.1f", p.Level)),
 				)
 			} else {
@@ -210,7 +199,7 @@ func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool, num
 				}
 				tideStr.WriteString(
 					S.AlmanacLow.Render("▼") + " " +
-						S.Value.Render(fmtTideTime(p.Time)) + " " +
+						S.Value.Render(FmtTideTime(p.Time)) + " " +
 						S.AlmanacLow.Render(fmt.Sprintf("%5.1f", p.Level)),
 				)
 			}

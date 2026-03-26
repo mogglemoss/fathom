@@ -15,8 +15,8 @@ A terminal tide dashboard powered by NOAA. Three views — live tides, 14-day al
 ## Features
 
 **Tide view**
-- Midnight-to-midnight fill chart with 8× vertical precision (▁▂▃▄▅▆▇█)
-- Past readings rendered vivid; future predictions in a distinct dim style
+- Midnight-to-midnight fill chart with smooth Catmull-Rom interpolated curve
+- Blue→cyan gradient fill; past readings vivid, future predictions in ocean teal
 - Live current level with rising ▲ / falling ▼ / steady — indicator
 - Next HIGH and LOW countdowns inline
 - ← / → arrow keys (or mouse click) to navigate to any date
@@ -54,6 +54,12 @@ A terminal tide dashboard powered by NOAA. Three views — live tides, 14-day al
 ---
 
 ## Installation
+
+### Homebrew
+
+```bash
+brew install mogglemoss/tap/fathom
+```
 
 ### go install
 
@@ -106,6 +112,7 @@ Config and theme preferences are saved to `~/.config/fathom/config.json`.
 | `t` | Jump to today |
 | `enter` | Drill into selected day (almanac) |
 | `s` | Station search |
+| `c` | Toggle 12h / 24h clock |
 | `r` | Refresh data |
 | `?` | Toggle full help |
 | `q` / `ctrl+c` | Quit |

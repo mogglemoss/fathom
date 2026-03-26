@@ -14,6 +14,9 @@ type tidePollTickMsg time.Time
 // predPollTickMsg fires every 6 hours to trigger predictions refresh.
 type predPollTickMsg time.Time
 
+// animTickMsg fires every 600ms to drive cursor animation on the tide chart.
+type animTickMsg time.Time
+
 // ── Data loaded messages ──────────────────────────────────────────────────────
 
 type waterLevelLoadedMsg struct {

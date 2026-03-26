@@ -12,6 +12,7 @@ type Config struct {
 	Units     string `json:"units"`      // "english" or "metric"
 	Datum     string `json:"datum"`      // vertical reference datum, e.g. "MLLW"
 	Theme     string `json:"theme"`      // "default", "catppuccin", "dracula", "nord"
+	Use24h    bool   `json:"use_24h"`
 }
 
 // DefaultConfig returns sensible defaults (Boston, English units, MLLW datum).
@@ -21,6 +22,7 @@ func DefaultConfig() Config {
 		Units:     "english",
 		Datum:     "MLLW",
 		Theme:     "default",
+		Use24h:    false,
 	}
 }
 

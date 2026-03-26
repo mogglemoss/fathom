@@ -57,6 +57,7 @@ type Model struct {
 	errMsg        string
 	lastUpdated   time.Time
 	refreshFlash  bool
+	animFrame     int
 	showHelp      bool
 
 	// Tide view date navigation
@@ -98,6 +99,7 @@ func (m Model) Init() tea.Cmd {
 		m.fetchDayCurveCmd(),
 		m.tidePollTickCmd(),
 		m.predPollTickCmd(),
+		m.animTickCmd(),
 	)
 }
 
@@ -187,6 +189,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshFlashClearMsg:
 		m.refreshFlash = false
+
+	case animTickMsg:
+		m.animFrame++
+		cmds = append(cmds, m.animTickCmd())
 
 	case errClearMsg:
 		m.errMsg = ""
@@ -307,6 +313,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.Refresh):
 			cmds = append(cmds, m.fetchWaterLevelCmd(), m.fetchMetCmd(), m.fetchPredictionsCmd())
+
+		case key.Matches(msg, m.keys.ToggleClock):
+			m.cfg.Use24h = !m.cfg.Use24h
+			ui.Use24h = m.cfg.Use24h
+			_ = config.Save(m.cfg)
 		}
 	}
 
@@ -516,6 +527,8 @@ func (m Model) View() string {
 	helpBar := ui.RenderHelpBar(m.width, m.showHelp, int(m.activeView), overlay)
 	bodyH := m.bodyHeight()
 
+	ui.Use24h = m.cfg.Use24h
+
 	var body string
 	if m.showDateInput {
 		body = ui.RenderDateInput(m.dateInput, m.dateInputErr, m.width, bodyH)
@@ -537,6 +550,7 @@ func (m Model) View() string {
 			body = ui.RenderTideView(
 				m.waterObs, m.predictions, m.met,
 				m.dayCurve, m.dayCurveStale, m.currentViewDate(), isToday, nowFrac,
+				m.animFrame,
 				m.width, bodyH,
 			)
 		case ViewAlmanac:
@@ -635,6 +649,14 @@ func (m Model) tidePollTickCmd() tea.Cmd {
 func (m Model) predPollTickCmd() tea.Cmd {
 	return tea.Tick(predPollInterval, func(t time.Time) tea.Msg {
 		return predPollTickMsg(t)
+	})
+}
+
+const animTickInterval = 600 * time.Millisecond
+
+func (m Model) animTickCmd() tea.Cmd {
+	return tea.Tick(animTickInterval, func(t time.Time) tea.Msg {
+		return animTickMsg(t)
 	})
 }
 

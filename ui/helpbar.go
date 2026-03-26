@@ -81,6 +81,7 @@ func contextHelp(full bool, view int, overlay string) []helpItem {
 				sep,
 				{"s", "station"},
 				{"r", "refresh"},
+				{"c", "clock"},
 				{"?", "less"},
 				{"q", "quit"},
 			}
@@ -92,6 +93,7 @@ func contextHelp(full bool, view int, overlay string) []helpItem {
 			sep,
 			{"s", "station"},
 			{"r", "refresh"},
+			{"c", "clock"},
 			{"?", "more"},
 			{"q", "quit"},
 		}

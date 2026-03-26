@@ -20,6 +20,7 @@ type KeyMap struct {
 	Confirm       key.Binding
 	Cancel        key.Binding
 	Quit          key.Binding
+	ToggleClock   key.Binding
 }
 
 // DefaultKeyMap returns the default key bindings.
@@ -88,6 +89,10 @@ func DefaultKeyMap() KeyMap {
 		Quit: key.NewBinding(
 			key.WithKeys("q", "ctrl+c"),
 			key.WithHelp("q", "quit"),
+		),
+		ToggleClock: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "12h/24h clock"),
 		),
 	}
 }
