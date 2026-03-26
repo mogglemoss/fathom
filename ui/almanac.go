@@ -12,6 +12,9 @@ import (
 	"github.com/mogglemoss/fathom/noaa"
 )
 
+// barFractions holds the 7 partial-fill block chars (1/8 through 7/8 of a cell).
+var barFractions = []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
+
 // significantPhaseNames are moon phases that display their full name.
 var significantPhaseNames = map[string]bool{
 	"New Moon":      true,
@@ -214,7 +217,7 @@ func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool, num
 	var rangeStr string
 	if hasHigh && hasLow {
 		rng := maxHigh - minLow
-		rangeStr = " " + S.Label.Render(fmt.Sprintf("%5.1fft", rng)) + S.Label.Render(rangeBar(rng, maxRange))
+		rangeStr = " " + S.Label.Render(fmt.Sprintf("%5.1fft", rng)) + rangeBar(rng, maxRange)
 	} else {
 		rangeStr = strings.Repeat(" ", almRangeW)
 	}
@@ -251,17 +254,45 @@ func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool, num
 	return row
 }
 
-// rangeBar returns a 6-char proportional bar (space + 5 block chars) showing
-// how rng compares to maxRange. Each ▓ = 20% of maxRange; remainder is ░.
+// rangeBar returns a styled 6-char proportional bar (space + 5 block chars)
+// showing how rng compares to maxRange. Uses fractional Unicode block characters
+// for sub-character precision and a 3-step color gradient (dim → medium → bright).
 func rangeBar(rng, maxRange float64) string {
 	if maxRange <= 0 {
-		return " ·····"
+		return S.Label.Render(" ·····")
 	}
-	filled := int(math.Round(rng / maxRange * 5))
-	if filled > 5 {
-		filled = 5
+	ratio := rng / maxRange
+
+	var barStyle lipgloss.Style
+	switch {
+	case ratio >= 0.7:
+		barStyle = S.AlmanacHigh
+	case ratio >= 0.4:
+		barStyle = lipgloss.NewStyle().Foreground(S.T.AccentSubtle)
+	default:
+		barStyle = S.Label
 	}
-	return " " + strings.Repeat("█", filled) + strings.Repeat("·", 5-filled)
+
+	// 5 cells × 8 sub-steps = 40 total eighths of a character.
+	totalEighths := int(math.Round(ratio * 5 * 8))
+	if totalEighths > 40 {
+		totalEighths = 40
+	}
+	fullBlocks := totalEighths / 8
+	remainder := totalEighths % 8
+
+	var filled strings.Builder
+	filled.WriteString(strings.Repeat("█", fullBlocks))
+	if remainder > 0 {
+		filled.WriteRune(barFractions[remainder-1])
+	}
+
+	emptyCount := 5 - fullBlocks
+	if remainder > 0 {
+		emptyCount--
+	}
+
+	return " " + barStyle.Render(filled.String()) + S.Label.Render(strings.Repeat("·", emptyCount))
 }
 
 // moonPhaseGlyph returns a Unicode moon emoji for the given synodic phase [0,1).
