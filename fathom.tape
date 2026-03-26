@@ -5,9 +5,10 @@ Output assets/fathom.gif
 
 Set Shell "fish"
 Set FontSize 14
+Set FontFamily "JetBrainsMono Nerd Font"
 Set Width 1200
 Set Height 700
-Set Theme "Catppuccin Mocha"
+Set Theme "Dark+"
 Set PlaybackSpeed 1.0
 Set TypingSpeed 80ms
 
