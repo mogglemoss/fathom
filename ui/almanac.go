@@ -255,13 +255,13 @@ func renderAlmanacRow(day noaa.DailyTide, width int, selected, isToday bool, num
 // how rng compares to maxRange. Each ▓ = 20% of maxRange; remainder is ░.
 func rangeBar(rng, maxRange float64) string {
 	if maxRange <= 0 {
-		return " ░░░░░"
+		return " ·····"
 	}
 	filled := int(math.Round(rng / maxRange * 5))
 	if filled > 5 {
 		filled = 5
 	}
-	return " " + strings.Repeat("▓", filled) + strings.Repeat("░", 5-filled)
+	return " " + strings.Repeat("█", filled) + strings.Repeat("·", 5-filled)
 }
 
 // moonPhaseGlyph returns a Unicode moon emoji for the given synodic phase [0,1).
