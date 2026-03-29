@@ -66,6 +66,9 @@ type Model struct {
 	dayCurveLoading bool
 	dayCurveStale   bool // true when dayCurve is from a previous date (new fetch in-flight)
 
+	// Almanac date navigation — zero means start from today
+	almanacDate time.Time
+
 	// Date input overlay state (tide view only)
 	showDateInput bool
 	dateInput     string
@@ -222,8 +225,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelp = !m.showHelp
 
 		case key.Matches(msg, m.keys.DateInput):
-			// Works from any view — switches to tide and opens date entry.
-			m.activeView = ViewTide
 			m.showDateInput = true
 			m.dateInput = ""
 			m.dateInputErr = ""
@@ -294,6 +295,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.dayCurveStale = true
 				m.dayCurveLoading = true
 				cmds = append(cmds, m.fetchDayCurveCmd())
+			}
+			if m.activeView == ViewAlmanac && !m.almanacDate.IsZero() {
+				m.almanacDate = time.Time{}
+				m.almanacCursor = 0
+				cmds = append(cmds, m.fetchPredictionsCmd())
 			}
 
 		case key.Matches(msg, m.keys.Confirm):
@@ -390,12 +396,15 @@ func (m *Model) updateDateInput(msg tea.KeyMsg) []tea.Cmd {
 		m.dateInputErr = ""
 		if isSameCalendarDay(t, time.Now(), m.loc) {
 			m.viewDate = time.Time{}
+			m.almanacDate = time.Time{}
 		} else {
 			m.viewDate = t
+			m.almanacDate = t
 		}
+		m.almanacCursor = 0
 		m.dayCurveStale = true
 		m.dayCurveLoading = true
-		return []tea.Cmd{m.fetchDayCurveCmd()}
+		return []tea.Cmd{m.fetchDayCurveCmd(), m.fetchPredictionsCmd()}
 
 	default:
 		switch msg.String() {
@@ -672,10 +681,13 @@ func (m Model) fetchWaterLevelCmd() tea.Cmd {
 
 func (m Model) fetchPredictionsCmd() tea.Cmd {
 	loc := m.loc
+	begin := time.Now()
+	if !m.almanacDate.IsZero() {
+		begin = m.almanacDate
+	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		begin := time.Now()
 		end := begin.AddDate(0, 0, predForecastDays)
 		preds, err := m.client.FetchPredictions(ctx, begin, end, loc)
 		return predictionsLoadedMsg{preds: preds, err: err}

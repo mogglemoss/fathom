@@ -1,6 +1,10 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Theme holds all color values for a visual theme.
 type Theme struct {
@@ -233,7 +237,7 @@ func initStyles() Styles {
 // SetTheme applies a named preset theme, overriding Omarchy detection.
 // Unknown names are silently ignored.
 func SetTheme(name string) {
-	if t, ok := Presets[name]; ok {
+	if t, ok := Presets[strings.ToLower(name)]; ok {
 		S = New(t)
 	}
 }

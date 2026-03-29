@@ -144,14 +144,15 @@ func RenderAlmanacView(
 }
 
 // AlmanacScrollOffset computes the scroll offset from cursor position.
+// The cursor is always the first visible row (the list starts at the cursor).
 // Exported so the model can reuse it for mouse-click row mapping.
 func AlmanacScrollOffset(cursor, visibleRows, totalDays int) int {
-	offset := cursor - visibleRows + 3
+	offset := cursor
 	if offset < 0 {
 		offset = 0
 	}
-	if offset > totalDays-visibleRows {
-		offset = totalDays - visibleRows
+	if offset >= totalDays {
+		offset = totalDays - 1
 		if offset < 0 {
 			offset = 0
 		}

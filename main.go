@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -69,6 +70,8 @@ func main() {
 	// Theme priority: --theme flag > omarchy (auto-detected in initStyles) > config > default
 	if *themeFlag != "" {
 		ui.SetTheme(*themeFlag)
+		cfg.Theme = strings.ToLower(*themeFlag)
+		_ = config.Save(cfg)
 	} else if cfg.Theme != "" && cfg.Theme != "default" {
 		ui.SetTheme(cfg.Theme)
 	}
